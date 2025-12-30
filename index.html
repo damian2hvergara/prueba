@@ -1241,10 +1241,6 @@
         
         <div class="vehicles-grid" id="vehiclesContainer">
             <!-- Cargado dinámicamente -->
-            <div style="text-align: center; grid-column: 1 / -1; padding: 40px; color: #86868b;">
-                <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 16px;"></i>
-                <p>Cargando vehículos...</p>
-            </div>
         </div>
     </section>
 
@@ -1302,10 +1298,6 @@
             
             <div class="testimonials-grid" id="testimonialsContainer">
                 <!-- Cargado dinámicamente -->
-                <div style="text-align: center; grid-column: 1 / -1; padding: 40px; color: #86868b;">
-                    <i class="fas fa-comments" style="font-size: 24px; margin-bottom: 16px;"></i>
-                    <p>Cargando testimonios...</p>
-                </div>
             </div>
         </div>
     </section>
@@ -1318,10 +1310,6 @@
             
             <div class="instagram-grid" id="instagramContainer">
                 <!-- Cargado dinámicamente -->
-                <div class="instagram-post" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #86868b;">
-                    <i class="fab fa-instagram" style="font-size: 40px; margin-bottom: 16px;"></i>
-                    <p>Cargando...</p>
-                </div>
             </div>
             
             <div style="text-align: center; margin-top: 40px;">
@@ -1458,461 +1446,1231 @@
     </div>
 
 <script>
-    // ========== CONFIGURACIÓN ==========
-    const API_URL = "https://script.google.com/macros/s/AKfycbwMNVf7u43iEfj4SAHkaHGVRvXMACO_oAIMMi0MqX65sbecOOBlkprSVeTiw76aCDki/exec";
-    const CACHE_KEY = 'import_cars_optimized';
-    
-    // ========== VARIABLES GLOBALES ==========
-    let siteData = {
-        vehicles: [],
-        testimonials: [],
-        instagram: [],
-        counters: [],
-        config: [],
-        lastUpdated: null
-    };
-    
-    let isInitialized = false;
-    let currentFilter = "all";
-    let selectedVehicle = null;
-    let selectedKit = null;
+// ========== CONFIGURACIÓN ==========
+const API_URL = "https://script.google.com/macros/s/AKfycbwMNVf7u43iEfj4SAHkaHGVRvXMACO_oAIMMi0MqX65sbecOOBlkprSVeTiw76aCDki/exec";
+const CACHE_KEY = 'import_cars_optimized';
 
-    // ========== 1. INICIALIZACIÓN RÁPIDA ==========
+// ========== VARIABLES GLOBALES ==========
+let siteData = {
+    vehicles: [],
+    testimonials: [],
+    instagram: [],
+    counters: [],
+    config: [],
+    lastUpdated: null
+};
+
+let currentFilter = "all";
+let selectedVehicle = null;
+let selectedKit = null;
+let currentGalleryIndex = 0;
+let currentInstagramGallery = null;
+let currentInstagramSlide = 0;
+
+// ========== 1. INICIALIZACIÓN ==========
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚗 Import American Cars - Iniciando...');
     
-    document.addEventListener('DOMContentLoaded', () => {
-        console.log('⚡ Iniciando carga optimizada...');
-        
-        // Mostrar esqueleto inmediatamente
+    // Inicializar funciones estáticas primero
+    initializeStaticFunctions();
+    
+    // Cargar datos desde Sheets
+    loadDataFromSheets();
+});
+
+// ========== 2. CARGAR DATOS DESDE GOOGLE SHEETS ==========
+async function loadDataFromSheets() {
+    try {
+        // Mostrar skeleton mientras carga
         showSkeletonUI();
         
-        // Cargar datos en segundo plano SIN bloquear
-        loadDataAsync();
-        
-        // Inicializar funciones que no dependen de datos
-        initializeStaticFunctions();
-    });
-    
-    function showSkeletonUI() {
-        // Mostrar placeholders mientras se cargan los datos
-        const vehiclesContainer = document.getElementById('vehiclesContainer');
-        if (vehiclesContainer) {
-            vehiclesContainer.innerHTML = `
-                <div class="skeleton-vehicle"></div>
-                <div class="skeleton-vehicle"></div>
-                <div class="skeleton-vehicle"></div>
-            `;
+        // Intentar cargar desde caché primero
+        const cachedData = getCachedData();
+        if (cachedData) {
+            siteData = cachedData;
+            updateUI(); // Mostrar datos en caché inmediatamente
         }
         
-        // Agregar CSS para skeleton
-        const style = document.createElement('style');
-        style.textContent = `
-            .skeleton-vehicle {
-                background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-                background-size: 200% 100%;
-                animation: loading 1.5s infinite;
-                border-radius: 12px;
-                height: 400px;
-            }
-            @keyframes loading {
-                0% { background-position: 200% 0; }
-                100% { background-position: -200% 0; }
-            }
-        `;
-        document.head.appendChild(style);
+        // Obtener datos frescos desde Google Sheets
+        const response = await fetch(API_URL);
+        const rawData = await response.json();
+        
+        // Procesar datos
+        siteData = processDataSafely(rawData);
+        
+        // Actualizar caché
+        cacheData(siteData);
+        
+        // Actualizar UI
+        updateUI();
+        
+        console.log('✅ Datos cargados correctamente:', {
+            vehículos: siteData.vehicles.length,
+            testimonios: siteData.testimonials.length,
+            instagram: siteData.instagram.length
+        });
+        
+    } catch (error) {
+        console.warn('⚠️ Error cargando datos:', error);
+        // Si hay error, mantener datos en caché si existían
     }
-    
-    async function loadDataAsync() {
-        try {
-            console.time('📊 Carga de datos');
-            
-            // Intentar caché primero (más rápido)
-            const cached = localStorage.getItem(CACHE_KEY);
-            if (cached) {
-                const { data, timestamp } = JSON.parse(cached);
-                // Usar caché incluso si está vieja, mientras se actualiza en segundo plano
-                siteData = data;
-                updateUI(); // Actualizar UI inmediatamente con datos en caché
+}
+
+// ========== 3. FUNCIONES DE CACHE ==========
+function getCachedData() {
+    try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+            const { data, timestamp } = JSON.parse(cached);
+            // Usar caché si tiene menos de 1 hora
+            if (Date.now() - timestamp < 3600000) {
+                return data;
             }
-            
-            // Cargar datos frescos en segundo plano
-            const freshData = await fetchWithTimeout(API_URL, 5000); // Timeout de 5 segundos
-            
-            if (freshData) {
-                siteData = processDataSafely(freshData);
-                
-                // Actualizar caché para siguiente visita
-                localStorage.setItem(CACHE_KEY, JSON.stringify({
-                    data: siteData,
-                    timestamp: Date.now()
-                }));
-                
-                // Actualizar UI si los datos son diferentes
-                updateUI();
-            }
-            
-            console.timeEnd('📊 Carga de datos');
-            console.log('✅ Datos cargados:', {
-                vehiculos: siteData.vehicles?.length || 0,
-                testimonios: siteData.testimonials?.length || 0
-            });
-            
-        } catch (error) {
-            console.warn('⚠️ Error cargando datos, usando caché:', error.message);
-            // Si hay error, ya mostramos datos desde caché (si existían)
         }
-        
-        isInitialized = true;
+    } catch (e) {
+        console.warn('Error leyendo caché:', e);
     }
+    return null;
+}
+
+function cacheData(data) {
+    try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({
+            data: data,
+            timestamp: Date.now()
+        }));
+    } catch (e) {
+        console.warn('Error guardando caché:', e);
+    }
+}
+
+// ========== 4. PROCESAMIENTO DE DATOS SEGURO ==========
+function processDataSafely(rawData) {
+    return {
+        vehicles: safelyParseVehicles(rawData?.vehicles || []),
+        testimonials: safelyParseTestimonials(rawData?.testimonials || []),
+        instagram: safelyParseInstagram(rawData?.instagram || []),
+        counters: safelyParseCounters(rawData?.counters || []),
+        config: safelyParseConfig(rawData?.config || []),
+        lastUpdated: new Date().toISOString()
+    };
+}
+
+function safelyParseVehicles(vehicles) {
+    if (!Array.isArray(vehicles)) return [];
     
-    async function fetchWithTimeout(url, timeout = 5000) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeout);
-        
+    return vehicles.map(vehicle => {
         try {
-            const response = await fetch(url, { signal: controller.signal });
-            clearTimeout(timeoutId);
+            const kits = safeJSONParse(vehicle.kits, []);
+            const gallery = safeJSONParse(vehicle.gallery, []);
+            const specifications = safeJSONParse(vehicle.specifications, {});
             
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            return await response.json();
+            return {
+                id: parseInt(vehicle.id) || 0,
+                name: String(vehicle.name || 'Vehículo'),
+                price: parseInt(vehicle.price) || 0,
+                status: ['stock', 'transit', 'reserve'].includes(vehicle.status) ? vehicle.status : 'stock',
+                location: String(vehicle.location || 'Arica'),
+                type: String(vehicle.type || ''),
+                description: String(vehicle.description || ''),
+                eta: String(vehicle.eta || 'Consultar'),
+                transitTime: vehicle.transitTime ? parseInt(vehicle.transitTime) : null,
+                baseImage: isValidUrl(vehicle.baseImage) ? vehicle.baseImage : 'https://images.unsplash.com/photo-1580274455191-1c62238fa333?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
+                gallery: gallery.length > 0 ? gallery : [
+                    'https://images.unsplash.com/photo-1580274455191-1c62238fa333?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
+                    'https://images.unsplash.com/photo-1563720223485-8d6d5c5c8b9a?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
+                    'https://images.unsplash.com/photo-1553440569-bcc63803a83d?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80'
+                ],
+                videoId: vehicle.videoId || null,
+                specifications: specifications,
+                kits: kits.length > 0 ? kits.map(kit => ({
+                    id: String(kit.id || Math.random().toString(36).substr(2, 9)),
+                    name: String(kit.name || 'Básico'),
+                    level: String(kit.level || 'basic'),
+                    price: parseInt(kit.price) || 0,
+                    description: String(kit.description || ''),
+                    features: Array.isArray(kit.features) ? kit.features : [],
+                    image: isValidUrl(kit.image) ? kit.image : (vehicle.baseImage || 'https://via.placeholder.com/800x600?text=Kit')
+                })) : generateDefaultKits(),
+                active: vehicle.active !== false
+            };
         } catch (error) {
-            clearTimeout(timeoutId);
-            if (error.name === 'AbortError') {
-                console.warn('⏱️ Timeout de API');
-            }
+            console.warn('Error procesando vehículo:', error);
             return null;
         }
+    }).filter(v => v !== null);
+}
+
+function generateDefaultKits() {
+    return [
+        {
+            id: 'basic',
+            name: 'Básico',
+            level: 'basic',
+            price: 0,
+            description: 'Equipamiento de fábrica',
+            features: ['Equipamiento original', 'Garantía de fábrica'],
+            image: 'https://via.placeholder.com/800x600?text=Kit+Básico'
+        }
+    ];
+}
+
+function safeJSONParse(str, defaultValue) {
+    if (!str) return defaultValue;
+    if (Array.isArray(str)) return str;
+    if (typeof str === 'object') return str;
+    
+    try {
+        return JSON.parse(str);
+    } catch {
+        return defaultValue;
+    }
+}
+
+function isValidUrl(string) {
+    if (!string) return false;
+    try {
+        new URL(string);
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+// ========== 5. FUNCIONES DE UI ==========
+function showSkeletonUI() {
+    const vehiclesContainer = document.getElementById('vehiclesContainer');
+    if (vehiclesContainer) {
+        vehiclesContainer.innerHTML = `
+            <div class="skeleton-vehicle"></div>
+            <div class="skeleton-vehicle"></div>
+            <div class="skeleton-vehicle"></div>
+        `;
     }
     
-    function processDataSafely(rawData) {
-        // Función SEGURA que nunca falla
-        return {
-            vehicles: safelyParseVehicles(rawData?.vehicles || []),
-            testimonials: Array.isArray(rawData?.testimonials) ? rawData.testimonials : [],
-            instagram: Array.isArray(rawData?.instagram) ? rawData.instagram : [],
-            counters: Array.isArray(rawData?.counters) ? rawData.counters : [],
-            config: Array.isArray(rawData?.config) ? rawData.config : [],
-            lastUpdated: rawData?.lastUpdated || new Date().toISOString()
-        };
-    }
-    
-    function safelyParseVehicles(vehicles) {
-        if (!Array.isArray(vehicles)) return [];
+    const style = document.createElement('style');
+    style.textContent = `
+        .skeleton-vehicle {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+            border-radius: 12px;
+            height: 400px;
+        }
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function updateUI() {
+    try {
+        updateStockCounts();
+        loadVehicles(currentFilter);
+        loadTestimonials();
+        loadInstagram();
+        updateCounterSection();
+        animateCounter();
+        updateContactInfo();
         
-        return vehicles.map(vehicle => {
-            try {
-                // Parsear JSONs de forma segura
-                const kits = safeJSONParse(vehicle.kits, []);
-                const gallery = safeJSONParse(vehicle.gallery, []);
-                const specs = safeJSONParse(vehicle.specifications, {});
+        // Quitar skeleton
+        document.querySelectorAll('.skeleton-vehicle').forEach(el => el.remove());
+    } catch (error) {
+        console.error('Error actualizando UI:', error);
+    }
+}
+
+// ========== 6. FUNCIONES PRINCIPALES DEL SITIO ==========
+
+// Actualizar contadores del hero
+function updateStockCounts() {
+    const vehicles = siteData.vehicles || [];
+    const stockCount = vehicles.filter(v => v.status === 'stock').length;
+    const transitCount = vehicles.filter(v => v.status === 'transit').length;
+    const reserveCount = vehicles.filter(v => v.status === 'reserve').length;
+    
+    document.getElementById('stockCount').textContent = stockCount;
+    document.getElementById('transitCount').textContent = transitCount;
+    document.getElementById('reserveCount').textContent = reserveCount;
+}
+
+// Formatear precio
+function formatPrice(price) {
+    if (!price && price !== 0) return '0';
+    return price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
+// Cargar vehículos
+function loadVehicles(filter = "all") {
+    const container = document.getElementById('vehiclesContainer');
+    if (!container) return;
+    
+    let filteredVehicles = siteData.vehicles || [];
+    
+    if (filter !== "all") {
+        filteredVehicles = filteredVehicles.filter(v => v.status === filter);
+    }
+    
+    // Actualizar botones activos
+    document.querySelectorAll('.filter-button').forEach(btn => {
+        const filterText = btn.textContent.toLowerCase();
+        if ((filter === "all" && filterText === "todos") || 
+            (filter === "stock" && filterText === "en stock") ||
+            (filter === "transit" && filterText === "en tránsito") ||
+            (filter === "reserve" && filterText === "para reservar")) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    
+    if (filteredVehicles.length === 0) {
+        container.innerHTML = `
+            <div style="text-align: center; grid-column: 1 / -1; padding: 60px; color: #86868b;">
+                <i class="fas fa-car" style="font-size: 48px; margin-bottom: 20px;"></i>
+                <h3 style="font-size: 21px; margin-bottom: 12px;">No hay vehículos disponibles</h3>
+                <p>Pronto agregaremos más vehículos a nuestro inventario.</p>
+                <button onclick="contactVehicle(0)" class="button" style="margin-top: 20px;">
+                    <i class="fab fa-whatsapp"></i> Contactar para más información
+                </button>
+            </div>
+        `;
+        return;
+    }
+    
+    // Renderizar vehículos
+    container.innerHTML = filteredVehicles.map(vehicle => {
+        const statusBadge = vehicle.status === 'stock' ? 
+            'status-badge-stock' : vehicle.status === 'transit' ? 
+            'status-badge-transit' : 'status-badge-reserve';
+        const statusText = vehicle.status === 'stock' ? 
+            'En Stock Arica' : vehicle.status === 'transit' ? 
+            'En Tránsito' : 'Para Reservar';
+        
+        return `
+            <div class="vehicle-card">
+                <img src="${vehicle.baseImage}" alt="${vehicle.name}" class="vehicle-image" 
+                     onclick="openInstagramGallery(${vehicle.id}); trackEvent('click', 'Gallery', '${vehicle.name}')">
+                <div class="vehicle-info">
+                    <div class="vehicle-status ${statusBadge}">
+                        ${statusText}
+                    </div>
+                    <h3 class="vehicle-title">${vehicle.name}</h3>
+                    <div class="vehicle-price">$${formatPrice(vehicle.price)} CLP</div>
+                    <p style="color: #86868b; font-size: 14px; margin-bottom: 16px;">${vehicle.description}</p>
+                    
+                    ${vehicle.transitTime ? `
+                        <div class="transit-timer">
+                            <div class="timer-icon">
+                                <i class="fas fa-shipping-fast"></i>
+                            </div>
+                            <div>
+                                <div class="timer-text">Llega en</div>
+                                <div class="timer-display" id="timer-${vehicle.id}">${vehicle.transitTime} días</div>
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    <div style="display: flex; gap: 8px; margin-top: 16px;">
+                        <button class="button" onclick="showVehicleDetails(${vehicle.id}); trackEvent('click', 'Vehicle', '${vehicle.name} Details')" style="flex: 1;">
+                            Ver Detalles
+                        </button>
+                        <button class="button button-outline" onclick="customizeVehicle(${vehicle.id}); trackEvent('click', 'Customize', '${vehicle.name}')" style="flex: 1;">
+                            Personalizar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // Scroll suave si se filtró
+    if (filter !== "all" && filteredVehicles.length > 0) {
+        setTimeout(() => {
+            document.getElementById('vehicles').scrollIntoView({ behavior: 'smooth' });
+        }, 300);
+    }
+}
+
+// Filtrar vehículos
+function filterVehicles(filter) {
+    currentFilter = filter;
+    trackEvent('filter', 'Vehicles', filter);
+    loadVehicles(filter);
+}
+
+// ========== 7. FUNCIONES DE PERSONALIZACIÓN (ORIGINALES) ==========
+
+// Mostrar detalles del vehículo
+function showVehicleDetails(vehicleId) {
+    const vehicle = siteData.vehicles.find(v => v.id === vehicleId);
+    if (!vehicle) return;
+    
+    selectedVehicle = vehicle;
+    currentGalleryIndex = 0;
+    
+    trackEvent('view', 'Vehicle Details', vehicle.name);
+    
+    const modalContent = document.getElementById('vehicleDetailsContent');
+    modalContent.innerHTML = `
+        <div class="customization-container">
+            <div class="customization-options">
+                <h2 style="font-size: 28px; font-weight: 700; margin-bottom: 8px;">${vehicle.name}</h2>
+                <p style="color: #86868b; margin-bottom: 24px;">${vehicle.description}</p>
                 
-                // Validar datos mínimos
-                return {
-                    id: parseInt(vehicle.id) || 0,
-                    name: String(vehicle.name || 'Vehículo').substring(0, 100),
-                    price: parseInt(vehicle.price) || 0,
-                    status: ['stock', 'transit', 'reserve'].includes(vehicle.status) ? vehicle.status : 'stock',
-                    location: String(vehicle.location || 'Arica'),
-                    description: String(vehicle.description || '').substring(0, 200),
-                    eta: String(vehicle.eta || 'Consultar'),
-                    transitTime: vehicle.transitTime ? parseInt(vehicle.transitTime) : null,
-                    baseImage: isValidUrl(vehicle.baseImage) ? vehicle.baseImage : 'https://via.placeholder.com/800x600?text=Vehículo',
-                    gallery: Array.isArray(gallery) && gallery.length > 0 ? 
-                             gallery.slice(0, 8).map(img => isValidUrl(img) ? img : 'https://via.placeholder.com/800x600?text=Imagen') : 
-                             generateDefaultGallery(vehicle.baseImage),
-                    videoId: vehicle.videoId || null,
-                    specifications: typeof specs === 'object' && specs !== null ? specs : {},
-                    kits: Array.isArray(kits) && kits.length > 0 ? 
-                          kits.map(kit => ({
-                              id: String(kit.id || Math.random().toString(36).substr(2, 9)),
-                              name: String(kit.name || 'Básico'),
-                              level: String(kit.level || 'basic'),
-                              price: parseInt(kit.price) || 0,
-                              description: String(kit.description || ''),
-                              features: Array.isArray(kit.features) ? kit.features : [],
-                              image: isValidUrl(kit.image) ? kit.image : (vehicle.baseImage || 'https://via.placeholder.com/800x600?text=Kit')
-                          })) : 
-                          generateDefaultKits(vehicle.baseImage),
-                    active: vehicle.active !== false
-                };
-            } catch (error) {
-                console.warn('⚠️ Error procesando vehículo:', error.message);
-                return null; // Retornar null, será filtrado después
-            }
-        }).filter(v => v !== null); // Filtrar vehículos con errores
-    }
-    
-    function safeJSONParse(str, defaultValue) {
-        if (!str) return defaultValue;
-        if (Array.isArray(str)) return str;
-        if (typeof str === 'object') return str;
-        
-        try {
-            return JSON.parse(str);
-        } catch {
-            return defaultValue;
-        }
-    }
-    
-    function isValidUrl(string) {
-        if (!string) return false;
-        try {
-            new URL(string);
-            return true;
-        } catch (_) {
-            return false;
-        }
-    }
-    
-    function generateDefaultGallery(baseImage) {
-        const defaultImages = [
-            baseImage || 'https://via.placeholder.com/800x600?text=Vehículo',
-            'https://images.unsplash.com/photo-1563720223485-8d6d5c5c8b9a?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
-            'https://images.unsplash.com/photo-1553440569-bcc63803a83d?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
-            'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80'
-        ];
-        return defaultImages.slice(0, 4);
-    }
-    
-    function generateDefaultKits(baseImage) {
-        return [
-            {
-                id: 'basic',
-                name: 'Básico',
-                level: 'basic',
-                price: 0,
-                description: 'Configuración estándar de fábrica',
-                features: ['Equipamiento original', 'Garantía de fábrica'],
-                image: baseImage || 'https://via.placeholder.com/800x600?text=Kit+Básico'
-            }
-        ];
-    }
-    
-    // ========== 2. ACTUALIZACIÓN DE UI CON CONTROL DE ERRORES ==========
-    
-    function updateUI() {
-        try {
-            // Actualizar contadores del hero (SI existen)
-            safeUpdate(() => updateStockCounts());
-            
-            // Actualizar sección de vehículos (SI existen datos)
-            safeUpdate(() => {
-                if (siteData.vehicles && siteData.vehicles.length > 0) {
-                    loadVehicles(currentFilter);
-                } else {
-                    showNoVehiclesMessage();
-                }
-            });
-            
-            // Actualizar testimonios (SI existen)
-            safeUpdate(() => {
-                if (siteData.testimonials && siteData.testimonials.length > 0) {
-                    loadTestimonials();
-                } else {
-                    hideSection('testimonials');
-                }
-            });
-            
-            // Actualizar Instagram (SI existen)
-            safeUpdate(() => {
-                if (siteData.instagram && siteData.instagram.length > 0) {
-                    loadInstagram();
-                } else {
-                    hideSection('instagram');
-                }
-            });
-            
-            // Actualizar contador principal (SI existe)
-            safeUpdate(() => {
-                if (siteData.counters && siteData.counters.length > 0) {
-                    updateCounterSection();
-                    animateCounter();
-                }
-            });
-            
-            // Actualizar información de contacto (SI existe)
-            safeUpdate(() => {
-                if (siteData.config && siteData.config.length > 0) {
-                    updateContactInfo();
-                }
-            });
-            
-        } catch (error) {
-            console.error('❌ Error actualizando UI:', error);
-        }
-    }
-    
-    function safeUpdate(callback) {
-        try {
-            callback();
-        } catch (error) {
-            console.warn('⚠️ Error en actualización parcial:', error.message);
-        }
-    }
-    
-    function hideSection(sectionId) {
-        const section = document.getElementById(sectionId);
-        if (section) {
-            section.style.display = 'none';
-        }
-    }
-    
-    function showNoVehiclesMessage() {
-        const container = document.getElementById('vehiclesContainer');
-        if (container) {
-            container.innerHTML = `
-                <div style="text-align: center; grid-column: 1 / -1; padding: 40px; color: #86868b;">
-                    <i class="fas fa-info-circle" style="font-size: 48px; margin-bottom: 20px;"></i>
-                    <h3 style="font-size: 21px; margin-bottom: 12px;">No hay vehículos disponibles por el momento</h3>
-                    <p>Estamos actualizando nuestro inventario. Por favor, contáctanos para más información.</p>
-                    <button onclick="contactVehicle(0)" class="button" style="margin-top: 20px;">
-                        <i class="fab fa-whatsapp"></i> Contactar
+                <div class="vehicle-gallery">
+                    <div class="main-image-container">
+                        <img src="${vehicle.gallery[0]}" alt="${vehicle.name}" class="main-image" id="mainGalleryImage" onclick="openInstagramGallery(${vehicle.id})">
+                    </div>
+                    
+                    <div class="gallery-thumbnails" id="galleryThumbnails">
+                        ${vehicle.gallery.map((img, index) => `
+                            <img src="${img}" alt="Vista ${index + 1}" class="thumbnail ${index === 0 ? 'active' : ''}" 
+                                 onclick="changeGalleryImage(${index}, ${vehicle.id})">
+                        `).join('')}
+                    </div>
+                    
+                    ${vehicle.videoId ? `
+                        <div class="video-container">
+                            <iframe src="https://www.youtube.com/embed/${vehicle.videoId}" 
+                                    title="Video de ${vehicle.name}" 
+                                    frameborder="0" 
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                    allowfullscreen>
+                            </iframe>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <h3 style="font-size: 17px; font-weight: 600; margin-bottom: 20px;">Especificaciones Técnicas</h3>
+                <div style="background: var(--gray-50); padding: 24px; border-radius: var(--radius); margin-bottom: 32px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+                        ${Object.entries(vehicle.specifications).map(([key, value]) => `
+                            <div style="margin-bottom: 12px;">
+                                <div style="font-size: 12px; color: #86868b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">
+                                    ${key.replace(/_/g, ' ')}
+                                </div>
+                                <div style="font-weight: 500;">${value}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <div style="display: flex; gap: 12px;">
+                    <button class="button" onclick="contactVehicle(${vehicle.id}); trackEvent('click', 'Contact', '${vehicle.name}')" style="flex: 1;">
+                        <i class="fab fa-whatsapp"></i> Consultar Disponibilidad
+                    </button>
+                    <button class="button button-outline" onclick="customizeVehicle(${vehicle.id}); trackEvent('click', 'Customize', '${vehicle.name} From Details')" style="flex: 1;">
+                        <i class="fas fa-cog"></i> Personalizar
                     </button>
                 </div>
-            `;
-        }
-    }
-    
-    // ========== 3. FUNCIONES PRINCIPALES (VERSIÓN SEGURA) ==========
-    
-    function updateStockCounts() {
-        const vehicles = siteData.vehicles || [];
-        const stock = vehicles.filter(v => v.status === 'stock').length;
-        const transit = vehicles.filter(v => v.status === 'transit').length;
-        const reserve = vehicles.filter(v => v.status === 'reserve').length;
-        
-        safeUpdate(() => {
-            document.getElementById('stockCount').textContent = stock;
-            document.getElementById('transitCount').textContent = transit;
-            document.getElementById('reserveCount').textContent = reserve;
-        });
-    }
-    
-    function loadVehicles(filter = "all") {
-        safeUpdate(() => {
-            const container = document.getElementById('vehiclesContainer');
-            if (!container) return;
+            </div>
             
-            let filtered = siteData.vehicles || [];
-            if (filter !== "all") {
-                filtered = filtered.filter(v => v.status === filter);
-            }
-            
-            if (filtered.length === 0) {
-                showNoVehiclesMessage();
-                return;
-            }
-            
-            container.innerHTML = filtered.map(vehicle => `
-                <div class="vehicle-card">
-                    <img src="${vehicle.baseImage}" 
-                         alt="${vehicle.name}"
-                         class="vehicle-image"
-                         onclick="openVehicleGallery(${vehicle.id})"
-                         onerror="this.src='https://via.placeholder.com/800x600?text=Vehículo'">
-                    <div class="vehicle-info">
-                        <div class="vehicle-status ${vehicle.status === 'stock' ? 'status-badge-stock' : 
-                                                   vehicle.status === 'transit' ? 'status-badge-transit' : 
-                                                   'status-badge-reserve'}">
-                            ${vehicle.status === 'stock' ? 'En Stock Arica' : 
-                             vehicle.status === 'transit' ? 'En Tránsito' : 'Para Reservar'}
+            <div class="customization-summary">
+                <h3 style="font-size: 17px; font-weight: 600; margin-bottom: 24px;">Resumen</h3>
+                
+                <div style="margin-bottom: 24px;">
+                    <div style="font-size: 13px; color: #86868b; margin-bottom: 8px;">Precio</div>
+                    <div style="font-size: 32px; font-weight: 700;">$${formatPrice(vehicle.price)} CLP</div>
+                    <div style="color: #86868b; font-size: 14px; margin-top: 4px;">${vehicle.location} • ${vehicle.eta}</div>
+                </div>
+                
+                <div style="margin-bottom: 24px;">
+                    <div class="vehicle-status ${vehicle.status === 'stock' ? 'status-badge-stock' : 'status-badge-transit'}" style="margin-bottom: 16px;">
+                        ${vehicle.status === 'stock' ? 'Disponible para entrega inmediata' : 'En camino desde USA'}
+                    </div>
+                    
+                    <div style="font-size: 14px; color: #86868b; line-height: 1.6;">
+                        <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                            <i class="fas fa-shield-alt" style="color: var(--import-red); margin-right: 8px;"></i>
+                            <span>Garantía de 6 meses</span>
                         </div>
-                        <h3 class="vehicle-title">${vehicle.name}</h3>
-                        <div class="vehicle-price">$${formatPrice(vehicle.price)} CLP</div>
-                        <p style="color: #86868b; font-size: 14px; margin-bottom: 16px;">${vehicle.description}</p>
-                        
-                        ${vehicle.transitTime ? `
-                            <div class="transit-timer">
-                                <div class="timer-icon"><i class="fas fa-shipping-fast"></i></div>
-                                <div>
-                                    <div class="timer-text">Llega en</div>
-                                    <div class="timer-display">${vehicle.transitTime} días</div>
-                                </div>
-                            </div>
-                        ` : ''}
-                        
-                        <div style="display: flex; gap: 8px; margin-top: 16px;">
-                            <button class="button" onclick="showVehicleDetails(${vehicle.id})" style="flex: 1;">
-                                Ver Detalles
-                            </button>
-                            <button class="button button-outline" onclick="customizeVehicle(${vehicle.id})" style="flex: 1;">
-                                Personalizar
-                            </button>
+                        <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                            <i class="fas fa-tools" style="color: var(--import-red); margin-right: 8px;"></i>
+                            <span>Inspección completa realizada</span>
+                        </div>
+                        <div style="display: flex; align-items: center;">
+                            <i class="fas fa-file-contract" style="color: var(--import-red); margin-right: 8px;"></i>
+                            <span>Documentación en regla</span>
                         </div>
                     </div>
                 </div>
-            `).join('');
-        });
-    }
+                
+                <div style="border-top: var(--border); padding-top: 20px;">
+                    <h4 style="font-size: 15px; font-weight: 600; margin-bottom: 12px;">Incluye</h4>
+                    <div style="font-size: 14px; color: #86868b; line-height: 1.6;">
+                        <div>• Revisión mecánica completa</div>
+                        <div>• Limpieza y detailing profesional</div>
+                        <div>• Certificado de origen USA</div>
+                        <div>• Asesoría en legalización</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
     
-    // ========== 4. FUNCIONES UTILITARIAS RÁPIDAS ==========
+    document.getElementById('vehicleDetailsModal').style.display = 'block';
+}
+
+// Personalizar vehículo
+function customizeVehicle(vehicleId) {
+    const vehicle = siteData.vehicles.find(v => v.id === vehicleId);
+    if (!vehicle) return;
     
-    function initializeStaticFunctions() {
-        // Funciones que no dependen de datos
-        setupFilters();
-        setupClickableIndicators();
-        setupGalleryKeyboard();
-        setupModalEvents();
+    selectedVehicle = vehicle;
+    selectedKit = vehicle.kits[0];
+    
+    trackEvent('open', 'Customization', vehicle.name);
+    
+    const modalContent = document.getElementById('customizationContent');
+    const isMobile = window.innerWidth <= 768;
+    
+    modalContent.innerHTML = `
+        <div class="customization-options">
+            <h2 style="font-size: 28px; font-weight: 700; margin-bottom: 8px;">Personalizar ${vehicle.name}</h2>
+            <p style="color: #86868b; margin-bottom: 32px;">${vehicle.description}</p>
+            
+            <!-- COMPARACIÓN VISUAL -->
+            ${isMobile ? `
+                <div class="mobile-compact-comparison">
+                    <div class="compact-image-container">
+                        <div class="compact-label">Original</div>
+                        <img src="${vehicle.baseImage}" alt="Vehículo base" class="comparison-image" id="mobileBaseImage">
+                    </div>
+                    
+                    <div class="compact-image-container">
+                        <div class="compact-label" id="mobileKitLabel">${selectedKit.name}</div>
+                        <img src="${selectedKit.image}" alt="Vehículo personalizado" class="comparison-image" id="mobileCustomImage">
+                    </div>
+                </div>
+            ` : `
+                <div class="visual-comparison">
+                    <div class="comparison-image-container">
+                        <div class="comparison-label">Vehículo Base</div>
+                        <img src="${vehicle.baseImage}" alt="Vehículo base" class="comparison-image" id="baseImage">
+                    </div>
+                    
+                    <div class="comparison-image-container">
+                        <div class="comparison-label">Con Kit: <span id="currentKitName">${selectedKit.name}</span></div>
+                        <img src="${selectedKit.image}" alt="Vehículo personalizado" class="comparison-image" id="customizedImage">
+                    </div>
+                </div>
+            `}
+            
+            <!-- PESTAÑAS DE KITS LATERALES -->
+            <h3 style="font-size: 17px; font-weight: 600; margin-bottom: 20px; margin-top: ${isMobile ? '20px' : '0'};">Selecciona un Kit</h3>
+            <div class="kit-tabs-container" id="kitTabsContainer">
+                ${vehicle.kits.map(kit => `
+                    <div class="kit-tab" 
+                         onclick="selectKit('${kit.id}', '${kit.image}', '${kit.name}', '${kit.description}', ${kit.price})"
+                         data-kit-id="${kit.id}">
+                        <div class="kit-tab-content">
+                            <div class="kit-tab-badge ${kit.level}">${kit.name}</div>
+                            <div class="kit-tab-name">${kit.description.split(' - ')[0] || kit.description}</div>
+                        </div>
+                        <div class="kit-tab-price ${kit.price === 0 ? 'included' : ''}">
+                            ${kit.price > 0 ? `+$${formatPrice(kit.price)}` : 'Incluido'}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+            
+            <!-- DETALLES DE LA PERSONALIZACIÓN SELECCIONADA -->
+            <div class="customization-details" id="customizationDetails">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px;">
+                    <div>
+                        <h4 style="font-size: 15px; font-weight: 600; margin-bottom: 4px;">Kit ${selectedKit.name}</h4>
+                        <p style="font-size: 13px; color: #86868b;">${selectedKit.description}</p>
+                    </div>
+                    <div style="font-size: 18px; font-weight: 700; color: ${selectedKit.price > 0 ? 'var(--import-red)' : '#86868b'}">
+                        ${selectedKit.price > 0 ? `+$${formatPrice(selectedKit.price)}` : 'Incluido'}
+                    </div>
+                </div>
+                
+                <div style="font-size: 13px; color: #86868b; margin-bottom: 8px;">Incluye:</div>
+                <div class="customization-features" id="kitFeatures">
+                    ${selectedKit.features.map(feature => `
+                        <div class="customization-feature">
+                            <i class="fas fa-check"></i>
+                            <span>${feature}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            
+            <!-- BOTONES DE ACCIÓN -->
+            <div style="display: flex; gap: 12px; margin-top: 32px; flex-direction: ${isMobile ? 'column' : 'row'}">
+                <button class="button" onclick="requestCustomization(); trackEvent('click', 'Request Quote', '${vehicle.name}')" style="flex: 1;">
+                    <i class="fab fa-whatsapp"></i> Solicitar Cotización
+                </button>
+                <button class="button button-outline" onclick="showVehicleDetails(${vehicle.id}); trackEvent('click', 'View Details', '${vehicle.name}')" style="flex: 1;">
+                    <i class="fas fa-info-circle"></i> Ver Detalles del Vehículo
+                </button>
+            </div>
+        </div>
         
-        // Mostrar que la página está lista
-        document.body.classList.add('loaded');
+        <!-- RESUMEN Y PRECIO -->
+        <div class="customization-summary">
+            <h3 style="font-size: 17px; font-weight: 600; margin-bottom: 24px;">Tu Configuración</h3>
+            
+            <div style="margin-bottom: 24px;">
+                <div style="font-size: 13px; color: #86868b; margin-bottom: 8px;">Vehículo base</div>
+                <div style="font-weight: 500; font-size: ${isMobile ? '15px' : 'inherit'}">${vehicle.name}</div>
+                <div style="font-size: ${isMobile ? '24px' : '21px'}; font-weight: 700; margin-top: 4px; color: var(--black);">$${formatPrice(vehicle.price)} CLP</div>
+            </div>
+            
+            <div style="margin-bottom: 24px;">
+                <div style="font-size: 13px; color: #86868b; margin-bottom: 8px;">Personalización</div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div>
+                        <div style="font-weight: 500; font-size: ${isMobile ? '15px' : 'inherit'}">Kit ${selectedKit.name}</div>
+                        <div style="font-size: 12px; color: #86868b;">${selectedKit.description}</div>
+                    </div>
+                    <div style="font-size: ${isMobile ? '18px' : '17px'}; font-weight: 600; color: ${selectedKit.price > 0 ? 'var(--import-red)' : '#86868b'}">
+                        ${selectedKit.price > 0 ? `+$${formatPrice(selectedKit.price)}` : 'Incluido'}
+                    </div>
+                </div>
+                
+                <!-- LISTA DE CARACTERÍSTICAS EN RESUMEN -->
+                <div style="background: rgba(99, 11, 11, 0.05); padding: 16px; border-radius: var(--radius); margin-top: 16px;">
+                    <div style="font-size: 12px; color: var(--import-red); font-weight: 500; margin-bottom: 8px;">Agregados al vehículo:</div>
+                    <div style="font-size: 11px; color: var(--black); line-height: 1.5;">
+                        ${selectedKit.features.slice(0, 4).map(f => `<div style="margin-bottom: 4px;">• ${f}</div>`).join('')}
+                        ${selectedKit.features.length > 4 ? '<div style="color: #86868b;">+ ' + (selectedKit.features.length - 4) + ' características más</div>' : ''}
+                    </div>
+                </div>
+            </div>
+            
+            <div style="border-top: var(--border); padding-top: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-weight: 600; font-size: 17px;">Total</div>
+                    <div style="font-size: ${isMobile ? '28px' : '32px'}; font-weight: 700;" id="totalPrice">
+                        $${formatPrice(vehicle.price + selectedKit.price)} CLP
+                    </div>
+                </div>
+                <div style="font-size: 12px; color: #86868b; margin-top: 8px;">
+                    Incluye instalación profesional y garantía de 6 meses
+                </div>
+            </div>
+            
+            <div style="margin-top: 24px; padding: 16px; border-radius: var(--radius); border: 1px dashed var(--gray-200);">
+                <div style="font-size: 13px; color: #86868b; margin-bottom: 8px;">Beneficios incluidos:</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <i class="fas fa-check" style="color: var(--import-red); font-size: 10px;"></i>
+                        <span>Instalación profesional</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <i class="fas fa-check" style="color: var(--import-red); font-size: 10px;"></i>
+                        <span>Garantía 6 meses</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <i class="fas fa-check" style="color: var(--import-red); font-size: 10px;"></i>
+                        <span>Accesorios USA</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <i class="fas fa-check" style="color: var(--import-red); font-size: 10px;"></i>
+                        <span>Certificado original</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Marcar el primer kit como seleccionado
+    const firstKitTab = document.querySelector(`[data-kit-id="${selectedKit.id}"]`);
+    if (firstKitTab) {
+        firstKitTab.classList.add('selected');
     }
     
-    function setupClickableIndicators() {
-        // Hacer contadores clickeables
-        const indicators = document.querySelectorAll('.stock-indicators .indicator');
-        if (indicators.length >= 3) {
-            indicators[0].onclick = () => filterAndScroll('stock');
-            indicators[1].onclick = () => filterAndScroll('transit');
-            indicators[2].onclick = () => filterAndScroll('reserve');
+    document.getElementById('customizationModal').style.display = 'block';
+}
+
+// Seleccionar kit
+function selectKit(kitId, kitImage, kitName, kitDescription, kitPrice) {
+    if (!selectedVehicle) return;
+    
+    const kit = selectedVehicle.kits.find(k => k.id === kitId);
+    if (!kit) return;
+    
+    selectedKit = kit;
+    
+    trackEvent('select', 'Kit', kitName);
+    
+    // Actualizar pestañas
+    document.querySelectorAll('#kitTabsContainer .kit-tab').forEach(item => {
+        item.classList.remove('selected');
+        if (item.getAttribute('data-kit-id') === kitId) {
+            item.classList.add('selected');
+        }
+    });
+    
+    // Actualizar imagen personalizada
+    const isMobile = window.innerWidth <= 768;
+    
+    if (isMobile) {
+        const mobileCustomImage = document.getElementById('mobileCustomImage');
+        const mobileKitLabel = document.getElementById('mobileKitLabel');
+        
+        if (mobileCustomImage) {
+            mobileCustomImage.src = kitImage;
+        }
+        
+        if (mobileKitLabel) {
+            mobileKitLabel.textContent = kitName;
+        }
+    } else {
+        const customizedImage = document.getElementById('customizedImage');
+        const currentKitName = document.getElementById('currentKitName');
+        
+        if (customizedImage) {
+            customizedImage.src = kitImage;
+        }
+        
+        if (currentKitName) {
+            currentKitName.textContent = kitName;
         }
     }
     
-    function filterAndScroll(filter) {
-        filterVehicles(filter);
-        setTimeout(() => {
-            const section = document.getElementById('vehicles');
-            if (section) section.scrollIntoView({ behavior: 'smooth' });
-        }, 100);
+    // Actualizar sección de detalles
+    updateCustomizationDetails();
+    
+    // Actualizar precio
+    updateTotalPrice();
+}
+
+// Actualizar detalles de personalización
+function updateCustomizationDetails() {
+    if (!selectedKit) return;
+    
+    const detailsContainer = document.getElementById('customizationDetails');
+    if (!detailsContainer) return;
+    
+    detailsContainer.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px;">
+            <div>
+                <h4 style="font-size: 15px; font-weight: 600; margin-bottom: 4px;">Kit ${selectedKit.name}</h4>
+                <p style="font-size: 13px; color: #86868b;">${selectedKit.description}</p>
+            </div>
+            <div style="font-size: 18px; font-weight: 700; color: ${selectedKit.price > 0 ? 'var(--import-red)' : '#86868b'}">
+                ${selectedKit.price > 0 ? `+$${formatPrice(selectedKit.price)}` : 'Incluido'}
+            </div>
+        </div>
+        
+        <div style="font-size: 13px; color: #86868b; margin-bottom: 8px;">Incluye:</div>
+        <div class="customization-features">
+            ${selectedKit.features.map(feature => `
+                <div class="customization-feature">
+                    <i class="fas fa-check"></i>
+                    <span>${feature}</span>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+// Actualizar precio total
+function updateTotalPrice() {
+    if (!selectedVehicle || !selectedKit) return;
+    
+    const totalElement = document.getElementById('totalPrice');
+    if (!totalElement) return;
+    
+    const total = selectedVehicle.price + selectedKit.price;
+    const isMobile = window.innerWidth <= 768;
+    
+    totalElement.textContent = `$${formatPrice(total)} CLP`;
+    totalElement.style.fontSize = isMobile ? '28px' : '32px';
+}
+
+// ========== 8. GALERÍA INSTAGRAM ==========
+
+// Abrir galería Instagram
+function openInstagramGallery(vehicleId) {
+    const vehicle = siteData.vehicles.find(v => v.id === vehicleId);
+    if (!vehicle) return;
+    
+    currentInstagramGallery = vehicle;
+    currentInstagramSlide = 0;
+    
+    trackEvent('open', 'Gallery', vehicle.name);
+    
+    const modal = document.getElementById('instagramGalleryModal');
+    const slidesContainer = document.getElementById('gallerySlidesContainer');
+    const dotsContainer = document.getElementById('galleryDots');
+    
+    // Crear slides
+    slidesContainer.innerHTML = vehicle.gallery.map((img, index) => `
+        <div class="gallery-slide ${index === 0 ? 'active' : ''}">
+            <img src="${img}" alt="${vehicle.name} - Imagen ${index + 1}" 
+                 onclick="toggleZoom(this)"
+                 ondblclick="toggleZoom(this)"
+                 loading="lazy">
+        </div>
+    `).join('');
+    
+    // Crear dots
+    dotsContainer.innerHTML = vehicle.gallery.map((_, index) => `
+        <div class="gallery-dot ${index === 0 ? 'active' : ''}" onclick="goToSlide(${index})"></div>
+    `).join('');
+    
+    // Actualizar contador
+    updateGalleryCounter();
+    
+    // Mostrar modal
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+}
+
+// Cambiar slide de galería
+function changeGallerySlide(direction) {
+    if (!currentInstagramGallery) return;
+    
+    const slides = document.querySelectorAll('.gallery-slide');
+    const dots = document.querySelectorAll('.gallery-dot');
+    
+    // Quitar zoom si está activo
+    const currentSlide = slides[currentInstagramSlide];
+    if (currentSlide) {
+        const img = currentSlide.querySelector('img');
+        if (img && img.classList.contains('zoomed')) {
+            img.classList.remove('zoomed');
+        }
     }
     
-    // ========== 5. FUNCIONES DE FORMATO Y ERROR HANDLING ==========
+    // Calcular nuevo índice
+    const newIndex = (currentInstagramSlide + direction + slides.length) % slides.length;
     
-    function formatPrice(price) {
-        if (!price && price !== 0) return '0';
-        return price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    // Actualizar slides
+    slides[currentInstagramSlide].classList.remove('active');
+    slides[newIndex].classList.add('active');
+    
+    // Actualizar dots
+    dots[currentInstagramSlide].classList.remove('active');
+    dots[newIndex].classList.add('active');
+    
+    currentInstagramSlide = newIndex;
+    updateGalleryCounter();
+    
+    trackEvent('navigation', 'Gallery', `Slide ${newIndex + 1}`);
+}
+
+// Ir a slide específico
+function goToSlide(index) {
+    if (!currentInstagramGallery) return;
+    
+    const slides = document.querySelectorAll('.gallery-slide');
+    const dots = document.querySelectorAll('.gallery-dot');
+    
+    // Quitar zoom si está activo
+    const currentSlide = slides[currentInstagramSlide];
+    if (currentSlide) {
+        const img = currentSlide.querySelector('img');
+        if (img && img.classList.contains('zoomed')) {
+            img.classList.remove('zoomed');
+        }
     }
     
-    function animateCounter() {
-        const counter = document.getElementById('importedVehiclesCounter');
-        if (!counter) return;
-        
-        const target = parseInt(counter.textContent) || 0;
-        if (target <= 0) return;
-        
-        let current = 0;
-        const increment = Math.ceil(target / 50);
-        const timer = setInterval(() => {
-            current += increment;
-            if (current >= target) {
-                current = target;
-                clearInterval(timer);
+    // Actualizar slides
+    slides[currentInstagramSlide].classList.remove('active');
+    slides[index].classList.add('active');
+    
+    // Actualizar dots
+    dots[currentInstagramSlide].classList.remove('active');
+    dots[index].classList.add('active');
+    
+    currentInstagramSlide = index;
+    updateGalleryCounter();
+}
+
+// Toggle zoom
+function toggleZoom(imgElement) {
+    imgElement.classList.toggle('zoomed');
+    trackEvent('zoom', 'Gallery', imgElement.classList.contains('zoomed') ? 'Zoom In' : 'Zoom Out');
+}
+
+// Actualizar contador de galería
+function updateGalleryCounter() {
+    if (!currentInstagramGallery) return;
+    
+    const counter = document.getElementById('galleryCounter');
+    counter.textContent = `${currentInstagramSlide + 1} / ${currentInstagramGallery.gallery.length}`;
+}
+
+// Cerrar galería Instagram
+function closeInstagramGallery() {
+    const modal = document.getElementById('instagramGalleryModal');
+    
+    // Quitar zoom si está activo
+    const currentSlide = document.querySelector('.gallery-slide.active');
+    if (currentSlide) {
+        const img = currentSlide.querySelector('img');
+        if (img && img.classList.contains('zoomed')) {
+            img.classList.remove('zoomed');
+        }
+    }
+    
+    modal.style.display = 'none';
+    document.body.style.overflow = 'auto';
+    currentInstagramGallery = null;
+    currentInstagramSlide = 0;
+}
+
+// ========== 9. FUNCIONES UTILITARIAS ==========
+
+// Inicializar funciones estáticas
+function initializeStaticFunctions() {
+    setupFilters();
+    setupGalleryKeyboard();
+    setupModalEvents();
+    setupClickableIndicators();
+}
+
+// Configurar filtros
+function setupFilters() {
+    document.querySelectorAll('.filter-button').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.filter-button').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+        });
+    });
+}
+
+// Configurar teclado para galería
+function setupGalleryKeyboard() {
+    document.addEventListener('keydown', (e) => {
+        const galleryModal = document.getElementById('instagramGalleryModal');
+        if (galleryModal.style.display === 'block') {
+            if (e.key === 'Escape') {
+                closeInstagramGallery();
+            } else if (e.key === 'ArrowRight') {
+                changeGallerySlide(1);
+            } else if (e.key === 'ArrowLeft') {
+                changeGallerySlide(-1);
+            } else if (e.key === ' ') {
+                e.preventDefault();
+                const currentImg = document.querySelector('.gallery-slide.active img');
+                if (currentImg) toggleZoom(currentImg);
             }
-            counter.textContent = current;
-        }, 30);
+        }
+    });
+}
+
+// Configurar eventos de modales
+function setupModalEvents() {
+    // Cerrar con ESC
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeVehicleDetailsModal();
+            closeCustomizationModal();
+            closeInstagramGallery();
+        }
+    });
+    
+    // Cerrar al hacer click fuera
+    document.getElementById('vehicleDetailsModal').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('vehicleDetailsModal')) {
+            closeVehicleDetailsModal();
+        }
+    });
+    
+    document.getElementById('customizationModal').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('customizationModal')) {
+            closeCustomizationModal();
+        }
+    });
+    
+    document.getElementById('instagramGalleryModal').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('instagramGalleryModal')) {
+            closeInstagramGallery();
+        }
+    });
+}
+
+// Configurar indicadores clickeables
+function setupClickableIndicators() {
+    const indicators = document.querySelectorAll('.stock-indicators .indicator');
+    indicators[0].onclick = () => filterAndScroll('stock');
+    indicators[1].onclick = () => filterAndScroll('transit');
+    indicators[2].onclick = () => filterAndScroll('reserve');
+}
+
+function filterAndScroll(filter) {
+    filterVehicles(filter);
+    setTimeout(() => {
+        document.getElementById('vehicles').scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+}
+
+// ========== 10. FUNCIONES DE CONTACTO ==========
+
+// Contactar por vehículo
+function contactVehicle(vehicleId) {
+    let vehicle;
+    if (vehicleId === 0) {
+        // Contacto general
+        vehicle = { name: "Asesoría Personalizada", price: 0, status: "stock" };
+    } else {
+        vehicle = siteData.vehicles.find(v => v.id === vehicleId);
     }
     
-    // ========== 6. EXPORTAR FUNCIONES AL SCOPE GLOBAL ==========
+    if (!vehicle) return;
     
-    window.filterVehicles = filterVehicles;
-    window.showVehicleDetails = showVehicleDetails;
-    window.customizeVehicle = customizeVehicle;
-    window.contactVehicle = contactVehicle;
-    window.refreshData = () => {
-        localStorage.removeItem(CACHE_KEY);
-        location.reload();
-    };
+    let message;
+    if (vehicleId === 0) {
+        message = `Hola, estoy interesado en recibir asesoría personalizada para importar un vehículo desde USA. ¿Podrían contactarme para conversar sobre mis necesidades?`;
+    } else {
+        message = `Hola, estoy interesado en el vehículo: ${vehicle.name} ${vehicle.price > 0 ? `($${formatPrice(vehicle.price)} CLP)` : ''}. Estado: ${vehicle.status === 'stock' ? 'En Stock Arica' : 'En Tránsito'}. ¿Podrían darme más información?`;
+    }
     
-    console.log('✅ Script cargado. La página cargará inmediatamente.');
+    trackEvent('contact', 'WhatsApp', vehicle.name);
+    window.open(`https://wa.me/56938654827?text=${encodeURIComponent(message)}`, '_blank');
+}
+
+// Solicitar cotización de personalización
+function requestCustomization() {
+    if (!selectedVehicle || !selectedKit) return;
+    
+    const total = selectedVehicle.price + selectedKit.price;
+    
+    const message = `Hola, quisiera cotizar esta configuración personalizada:%0A%0A🚗 *Vehículo:* ${selectedVehicle.name}%0A💰 *Precio base:* $${formatPrice(selectedVehicle.price)} CLP%0A%0A⚙️ *Kit seleccionado:* ${selectedKit.name}%0A📋 *Descripción:* ${selectedKit.description}%0A🔧 *Incluye:* ${selectedKit.features.join(', ')}%0A💵 *Valor kit:* $${formatPrice(selectedKit.price)} CLP%0A%0A💵 *TOTAL CONFIGURACIÓN:* $${formatPrice(total)} CLP%0A%0A¿Podemos proceder con esta configuración?`;
+    
+    trackEvent('request', 'Customization Quote', `${selectedVehicle.name} - ${selectedKit.name}`);
+    window.open(`https://wa.me/56938654827?text=${encodeURIComponent(message)}`, '_blank');
+}
+
+// ========== 11. CERRAR MODALES ==========
+
+function closeVehicleDetailsModal() {
+    document.getElementById('vehicleDetailsModal').style.display = 'none';
+    selectedVehicle = null;
+    currentGalleryIndex = 0;
+}
+
+function closeCustomizationModal() {
+    document.getElementById('customizationModal').style.display = 'none';
+    selectedVehicle = null;
+    selectedKit = null;
+}
+
+// ========== 12. FUNCIONES DE DATOS ==========
+
+// Cargar testimonios
+function loadTestimonials() {
+    const container = document.getElementById('testimonialsContainer');
+    if (!container || !siteData.testimonials || siteData.testimonials.length === 0) return;
+    
+    container.innerHTML = siteData.testimonials.slice(0, 3).map(testimonial => `
+        <div class="testimonial-card">
+            <div class="testimonial-header">
+                <img src="${testimonial.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-4.0.3&auto=format&fit=crop&w=200&q=80'}" 
+                     alt="${testimonial.name}" class="testimonial-avatar">
+                <div class="testimonial-info">
+                    <h4>${testimonial.name}</h4>
+                    <p>${testimonial.vehicle}</p>
+                </div>
+            </div>
+            <p class="testimonial-text">"${testimonial.text}"</p>
+            <div class="testimonial-rating">
+                ${'<i class="fas fa-star"></i>'.repeat(testimonial.rating || 5)}
+            </div>
+        </div>
+    `).join('');
+}
+
+// Cargar Instagram
+function loadInstagram() {
+    const container = document.getElementById('instagramContainer');
+    if (!container || !siteData.instagram || siteData.instagram.length === 0) return;
+    
+    container.innerHTML = siteData.instagram.slice(0, 6).map(post => `
+        <a href="${post.link || 'https://instagram.com/tu_usuario'}" target="_blank" class="instagram-post" onclick="trackEvent('click', 'Social', 'Instagram Post')">
+            <img src="${post.image || 'https://via.placeholder.com/400x400?text=Instagram'}" 
+                 alt="${post.caption || 'Entrega Real'}" class="instagram-image">
+            <div class="instagram-overlay">
+                <i class="fab fa-instagram instagram-icon"></i>
+            </div>
+        </a>
+    `).join('');
+}
+
+// Actualizar contador principal
+function updateCounterSection() {
+    if (!siteData.counters || siteData.counters.length === 0) return;
+    
+    const counter = document.getElementById('importedVehiclesCounter');
+    const counterText = document.getElementById('counterDescription');
+    
+    if (counter) {
+        counter.textContent = siteData.counters[0]?.imported_vehicles || '142';
+    }
+    
+    if (counterText) {
+        counterText.textContent = siteData.counters[0]?.description || 'Vehículos americanos importados exitosamente desde USA a Arica';
+    }
+}
+
+// Animación contador
+function animateCounter() {
+    const counterElement = document.getElementById('importedVehiclesCounter');
+    if (!counterElement) return;
+    
+    const targetNumber = parseInt(counterElement.textContent) || 0;
+    if (targetNumber <= 0) return;
+    
+    let current = 0;
+    const duration = 2000;
+    const steps = 60;
+    const increment = Math.ceil(targetNumber / steps);
+    
+    const timer = setInterval(() => {
+        current += increment;
+        if (current >= targetNumber) {
+            current = targetNumber;
+            clearInterval(timer);
+        }
+        counterElement.textContent = current;
+    }, duration / steps);
+}
+
+// Actualizar información de contacto
+function updateContactInfo() {
+    if (!siteData.config || siteData.config.length === 0) return;
+    
+    const contactInfo = document.getElementById('contactInfo');
+    if (!contactInfo) return;
+    
+    const config = siteData.config[0];
+    
+    contactInfo.innerHTML = `
+        <p>📍 ${config.address || 'Av. Principal 1234, Arica, Chile'}</p>
+        <p>📞 ${config.phone || '+56 9 3865 4827'}</p>
+        <p>✉️ ${config.email || 'contacto@importamericancars.cl'}</p>
+    `;
+}
+
+// ========== 13. FUNCIONES GLOBALES ==========
+
+// Cambiar imagen de galería
+function changeGalleryImage(index, vehicleId) {
+    const vehicle = siteData.vehicles.find(v => v.id === vehicleId);
+    if (!vehicle) return;
+    
+    currentGalleryIndex = index;
+    
+    document.getElementById('mainGalleryImage').src = vehicle.gallery[index];
+    
+    document.querySelectorAll('#galleryThumbnails .thumbnail').forEach((thumb, i) => {
+        thumb.classList.toggle('active', i === index);
+    });
+    
+    trackEvent('click', 'Gallery Thumbnail', `Image ${index + 1}`);
+}
+
+// Mostrar modal de personalización
+function showCustomizationModal() {
+    const modalContent = document.getElementById('customizationContent');
+    modalContent.innerHTML = `
+        <div class="customization-options">
+            <h2 style="font-size: 28px; font-weight: 700; margin-bottom: 8px;">Simular Personalización</h2>
+            <p style="color: #86868b; margin-bottom: 32px;">Selecciona un vehículo para comenzar</p>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+                ${siteData.vehicles.slice(0, 3).map(vehicle => `
+                    <div onclick="customizeVehicle(${vehicle.id})" style="cursor: pointer; border: var(--border); border-radius: var(--radius); padding: 20px; text-align: center;">
+                        <img src="${vehicle.baseImage}" style="width: 100%; height: 120px; object-fit: cover; border-radius: 6px; margin-bottom: 12px;">
+                        <div style="font-weight: 500; margin-bottom: 4px;">${vehicle.name}</div>
+                        <div style="font-size: 14px; color: #86868b; margin-bottom: 8px;">${vehicle.description.split('•')[0]}</div>
+                        <div style="font-size: 17px; font-weight: 600;">$${formatPrice(vehicle.price)} CLP</div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+        <div class="customization-summary">
+            <h3 style="font-size: 17px; font-weight: 600; margin-bottom: 16px;">Beneficios</h3>
+            <div style="color: #86868b; font-size: 14px; line-height: 1.8;">
+                <div style="display: flex; align-items: start; margin-bottom: 16px;">
+                    <i class="fas fa-check" style="color: var(--import-red); margin-right: 12px; margin-top: 4px;"></i>
+                    <span>Accesorios USA originales</span>
+                </div>
+                <div style="display: flex; align-items: start; margin-bottom: 16px;">
+                    <i class="fas fa-check" style="color: var(--import-red); margin-right: 12px; margin-top: 4px;"></i>
+                    <span>Instalación profesional en Arica</span>
+                </div>
+                <div style="display: flex; align-items: start; margin-bottom: 16px;">
+                    <i class="fas fa-check" style="color: var(--import-red); margin-right: 12px; margin-top: 4px;"></i>
+                    <span>Garantía de 6 meses</span>
+                </div>
+                <div style="display: flex; align-items: start;">
+                    <i class="fas fa-check" style="color: var(--import-red); margin-right: 12px; margin-top: 4px;"></i>
+                    <span>Precio todo incluido</span>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.getElementById('customizationModal').style.display = 'block';
+}
+
+// Refrescar datos
+function refreshData() {
+    localStorage.removeItem(CACHE_KEY);
+    loadDataFromSheets();
+    
+    // Mostrar notificación
+    const lastUpdated = document.getElementById('lastUpdated');
+    if (lastUpdated) {
+        lastUpdated.textContent = 'Actualizando...';
+        setTimeout(() => {
+            lastUpdated.textContent = `Actualizado: ${new Date().toLocaleTimeString()}`;
+        }, 1000);
+    }
+}
+
+// ========== 14. FUNCIONES DE PARSING DE DATOS ==========
+
+function safelyParseTestimonials(testimonials) {
+    if (!Array.isArray(testimonials)) return [];
+    return testimonials.filter(t => t.name && t.text);
+}
+
+function safelyParseInstagram(instagram) {
+    if (!Array.isArray(instagram)) return [];
+    return instagram.filter(i => i.image);
+}
+
+function safelyParseCounters(counters) {
+    if (!Array.isArray(counters)) return [];
+    return counters;
+}
+
+function safelyParseConfig(config) {
+    if (!Array.isArray(config)) return [];
+    return config;
+}
+
+// ========== 15. EXPORTAR FUNCIONES AL GLOBAL SCOPE ==========
+
+window.filterVehicles = filterVehicles;
+window.showVehicleDetails = showVehicleDetails;
+window.customizeVehicle = customizeVehicle;
+window.contactVehicle = contactVehicle;
+window.refreshData = refreshData;
+window.openInstagramGallery = openInstagramGallery;
+window.changeGallerySlide = changeGallerySlide;
+window.goToSlide = goToSlide;
+window.toggleZoom = toggleZoom;
+window.closeInstagramGallery = closeInstagramGallery;
+window.changeGalleryImage = changeGalleryImage;
+window.selectKit = selectKit;
+window.showCustomizationModal = showCustomizationModal;
+window.requestCustomization = requestCustomization;
+window.closeVehicleDetailsModal = closeVehicleDetailsModal;
+window.closeCustomizationModal = closeCustomizationModal;
+
+console.log('🚀 Import American Cars - Script cargado y listo!');
 </script>
 </body>
 </html>
