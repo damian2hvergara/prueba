@@ -1457,1450 +1457,462 @@
         </div>
     </div>
 
-    <script>
-        // ========== CONFIGURACIÓN ==========
-        const API_URL = "https://script.google.com/macros/s/AKfycbwMNVf7u43iEfj4SAHkaHGVRvXMACO_oAIMMi0MqX65sbecOOBlkprSVeTiw76aCDki/exec";
-        const CACHE_KEY = 'import_cars_cache';
-        const CACHE_DURATION = 10 * 60 * 1000; // 10 minutos
+<script>
+    // ========== CONFIGURACIÓN ==========
+    const API_URL = "https://script.google.com/macros/s/AKfycbwMNVf7u43iEfj4SAHkaHGVRvXMACO_oAIMMi0MqX65sbecOOBlkprSVeTiw76aCDki/exec";
+    const CACHE_KEY = 'import_cars_optimized';
+    
+    // ========== VARIABLES GLOBALES ==========
+    let siteData = {
+        vehicles: [],
+        testimonials: [],
+        instagram: [],
+        counters: [],
+        config: [],
+        lastUpdated: null
+    };
+    
+    let isInitialized = false;
+    let currentFilter = "all";
+    let selectedVehicle = null;
+    let selectedKit = null;
 
-        // ========== VARIABLES GLOBALES ==========
-        let siteData = {
-            vehicles: [],
-            testimonials: [],
-            instagram: [],
-            counters: [],
-            config: [],
-            lastUpdated: null
-        };
-
-        let currentFilter = "all";
-        let selectedVehicle = null;
-        let selectedKit = null;
-        let currentGalleryIndex = 0;
-        let currentInstagramGallery = null;
-        let currentInstagramSlide = 0;
-
-        // ========== FUNCIONES DE CARGA DE DATOS ==========
-
-        async function loadSiteData() {
-            console.log('🔄 Cargando datos de la API...');
+    // ========== 1. INICIALIZACIÓN RÁPIDA ==========
+    
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('⚡ Iniciando carga optimizada...');
+        
+        // Mostrar esqueleto inmediatamente
+        showSkeletonUI();
+        
+        // Cargar datos en segundo plano SIN bloquear
+        loadDataAsync();
+        
+        // Inicializar funciones que no dependen de datos
+        initializeStaticFunctions();
+    });
+    
+    function showSkeletonUI() {
+        // Mostrar placeholders mientras se cargan los datos
+        const vehiclesContainer = document.getElementById('vehiclesContainer');
+        if (vehiclesContainer) {
+            vehiclesContainer.innerHTML = `
+                <div class="skeleton-vehicle"></div>
+                <div class="skeleton-vehicle"></div>
+                <div class="skeleton-vehicle"></div>
+            `;
+        }
+        
+        // Agregar CSS para skeleton
+        const style = document.createElement('style');
+        style.textContent = `
+            .skeleton-vehicle {
+                background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+                background-size: 200% 100%;
+                animation: loading 1.5s infinite;
+                border-radius: 12px;
+                height: 400px;
+            }
+            @keyframes loading {
+                0% { background-position: 200% 0; }
+                100% { background-position: -200% 0; }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    async function loadDataAsync() {
+        try {
+            console.time('📊 Carga de datos');
             
-            // Verificar caché primero
+            // Intentar caché primero (más rápido)
             const cached = localStorage.getItem(CACHE_KEY);
             if (cached) {
                 const { data, timestamp } = JSON.parse(cached);
-                if (Date.now() - timestamp < CACHE_DURATION) {
-                    console.log('📦 Usando datos en caché');
-                    siteData = data;
-                    
-                    // Actualizar timestamp de última actualización
-                    updateLastUpdated();
-                    return true;
-                }
+                // Usar caché incluso si está vieja, mientras se actualiza en segundo plano
+                siteData = data;
+                updateUI(); // Actualizar UI inmediatamente con datos en caché
             }
             
-            try {
-                // Cargar de la API
-                const response = await fetch(API_URL);
-                if (!response.ok) {
-                    throw new Error(`Error HTTP: ${response.status}`);
-                }
+            // Cargar datos frescos en segundo plano
+            const freshData = await fetchWithTimeout(API_URL, 5000); // Timeout de 5 segundos
+            
+            if (freshData) {
+                siteData = processDataSafely(freshData);
                 
-                const data = await response.json();
-                
-                // Validar y procesar datos
-                siteData = {
-                    vehicles: Array.isArray(data.vehicles) ? data.vehicles : [],
-                    testimonials: Array.isArray(data.testimonials) ? data.testimonials : [],
-                    instagram: Array.isArray(data.instagram) ? data.instagram : [],
-                    counters: Array.isArray(data.counters) ? data.counters : [],
-                    config: Array.isArray(data.config) ? data.config : [],
-                    lastUpdated: data.lastUpdated || new Date().toISOString()
-                };
-                
-                // Guardar en caché
+                // Actualizar caché para siguiente visita
                 localStorage.setItem(CACHE_KEY, JSON.stringify({
                     data: siteData,
                     timestamp: Date.now()
                 }));
                 
-                console.log('✅ Datos cargados correctamente:', {
-                    vehicles: siteData.vehicles.length,
-                    testimonials: siteData.testimonials.length,
-                    instagram: siteData.instagram.length
-                });
-                
-                updateLastUpdated();
-                return true;
-                
-            } catch (error) {
-                console.error('❌ Error cargando datos:', error);
-                
-                // Intentar usar caché aunque esté expirada
-                if (cached) {
-                    const { data } = JSON.parse(cached);
-                    siteData = data;
-                    console.warn('⚠️ Usando caché expirada como respaldo');
-                    updateLastUpdated();
-                    return true;
-                }
-                
-                // Cargar datos de respaldo mínimos
-                loadFallbackData();
-                return false;
+                // Actualizar UI si los datos son diferentes
+                updateUI();
             }
-        }
-
-        function loadFallbackData() {
-            console.warn('⚠️ Usando datos de respaldo mínimos');
             
-            siteData = {
-                vehicles: [],
-                testimonials: [],
-                instagram: [],
-                counters: [{ name: 'total_imported', value: 142 }],
-                config: [],
-                lastUpdated: new Date().toISOString()
-            };
+            console.timeEnd('📊 Carga de datos');
+            console.log('✅ Datos cargados:', {
+                vehiculos: siteData.vehicles?.length || 0,
+                testimonios: siteData.testimonials?.length || 0
+            });
             
-            updateLastUpdated();
+        } catch (error) {
+            console.warn('⚠️ Error cargando datos, usando caché:', error.message);
+            // Si hay error, ya mostramos datos desde caché (si existían)
         }
-
-        function updateLastUpdated() {
-            const element = document.getElementById('lastUpdated');
-            if (element && siteData.lastUpdated) {
-                const date = new Date(siteData.lastUpdated);
-                element.textContent = `Actualizado: ${date.toLocaleTimeString()}`;
+        
+        isInitialized = true;
+    }
+    
+    async function fetchWithTimeout(url, timeout = 5000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return await response.json();
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                console.warn('⏱️ Timeout de API');
             }
+            return null;
         }
-
-        // ========== FUNCIONES DE INICIALIZACIÓN ==========
-
-        async function initializeSite() {
-            console.log('🚀 Inicializando sitio...');
-            
+    }
+    
+    function processDataSafely(rawData) {
+        // Función SEGURA que nunca falla
+        return {
+            vehicles: safelyParseVehicles(rawData?.vehicles || []),
+            testimonials: Array.isArray(rawData?.testimonials) ? rawData.testimonials : [],
+            instagram: Array.isArray(rawData?.instagram) ? rawData.instagram : [],
+            counters: Array.isArray(rawData?.counters) ? rawData.counters : [],
+            config: Array.isArray(rawData?.config) ? rawData.config : [],
+            lastUpdated: rawData?.lastUpdated || new Date().toISOString()
+        };
+    }
+    
+    function safelyParseVehicles(vehicles) {
+        if (!Array.isArray(vehicles)) return [];
+        
+        return vehicles.map(vehicle => {
             try {
-                // 1. Cargar datos
-                const success = await loadSiteData();
+                // Parsear JSONs de forma segura
+                const kits = safeJSONParse(vehicle.kits, []);
+                const gallery = safeJSONParse(vehicle.gallery, []);
+                const specs = safeJSONParse(vehicle.specifications, {});
                 
-                if (!success) {
-                    showError('No se pudieron cargar los datos. Mostrando información básica.');
-                }
-                
-                // 2. Inicializar todos los componentes
-                updateCounterSection();
-                updateStockCounts();
-                loadVehicles();
-                loadTestimonials();
-                loadInstagram();
-                updateContactInfo();
-                updateHeroContent();
-                setupFilters();
-                setupGalleryKeyboard();
-                updateTransitTimers();
-                
-                // 3. Animar contador después de cargar todo
-                setTimeout(() => {
-                    animateCounter();
-                }, 500);
-                
-                console.log('✅ Sitio inicializado correctamente');
-                
+                // Validar datos mínimos
+                return {
+                    id: parseInt(vehicle.id) || 0,
+                    name: String(vehicle.name || 'Vehículo').substring(0, 100),
+                    price: parseInt(vehicle.price) || 0,
+                    status: ['stock', 'transit', 'reserve'].includes(vehicle.status) ? vehicle.status : 'stock',
+                    location: String(vehicle.location || 'Arica'),
+                    description: String(vehicle.description || '').substring(0, 200),
+                    eta: String(vehicle.eta || 'Consultar'),
+                    transitTime: vehicle.transitTime ? parseInt(vehicle.transitTime) : null,
+                    baseImage: isValidUrl(vehicle.baseImage) ? vehicle.baseImage : 'https://via.placeholder.com/800x600?text=Vehículo',
+                    gallery: Array.isArray(gallery) && gallery.length > 0 ? 
+                             gallery.slice(0, 8).map(img => isValidUrl(img) ? img : 'https://via.placeholder.com/800x600?text=Imagen') : 
+                             generateDefaultGallery(vehicle.baseImage),
+                    videoId: vehicle.videoId || null,
+                    specifications: typeof specs === 'object' && specs !== null ? specs : {},
+                    kits: Array.isArray(kits) && kits.length > 0 ? 
+                          kits.map(kit => ({
+                              id: String(kit.id || Math.random().toString(36).substr(2, 9)),
+                              name: String(kit.name || 'Básico'),
+                              level: String(kit.level || 'basic'),
+                              price: parseInt(kit.price) || 0,
+                              description: String(kit.description || ''),
+                              features: Array.isArray(kit.features) ? kit.features : [],
+                              image: isValidUrl(kit.image) ? kit.image : (vehicle.baseImage || 'https://via.placeholder.com/800x600?text=Kit')
+                          })) : 
+                          generateDefaultKits(vehicle.baseImage),
+                    active: vehicle.active !== false
+                };
             } catch (error) {
-                console.error('❌ Error inicializando sitio:', error);
-                showError('Error al cargar el sitio. Por favor, recarga la página.');
+                console.warn('⚠️ Error procesando vehículo:', error.message);
+                return null; // Retornar null, será filtrado después
             }
+        }).filter(v => v !== null); // Filtrar vehículos con errores
+    }
+    
+    function safeJSONParse(str, defaultValue) {
+        if (!str) return defaultValue;
+        if (Array.isArray(str)) return str;
+        if (typeof str === 'object') return str;
+        
+        try {
+            return JSON.parse(str);
+        } catch {
+            return defaultValue;
         }
-
-        function showError(message) {
-            console.error('💥 Error:', message);
-            // Podrías mostrar un toast o mensaje al usuario
+    }
+    
+    function isValidUrl(string) {
+        if (!string) return false;
+        try {
+            new URL(string);
+            return true;
+        } catch (_) {
+            return false;
         }
-
-        // ========== FUNCIONES DE CONTADORES ==========
-
-        function updateStockCounts() {
-            const vehicles = siteData.vehicles || [];
-            
-            // Contadores automáticos basados en los vehículos
-            const stockCount = vehicles.filter(v => v.status === "stock").length;
-            const transitCount = vehicles.filter(v => v.status === "transit").length;
-            const reserveCount = vehicles.filter(v => v.status === "reserve").length;
-            
-            // Actualizar UI
-            document.getElementById('stockCount').textContent = stockCount;
-            document.getElementById('transitCount').textContent = transitCount;
-            document.getElementById('reserveCount').textContent = reserveCount;
-            
-            console.log('📊 Contadores automáticos actualizados:', { stockCount, transitCount, reserveCount });
-        }
-
-        function updateCounterSection() {
-            // Contador manual desde Google Sheets
-            const totalCounter = siteData.counters.find(c => c.name === "total_imported");
-            const totalImported = totalCounter ? totalCounter.value : 142;
-            
-            // Actualizar número
-            document.getElementById('importedVehiclesCounter').textContent = totalImported;
-            
-            // Actualizar texto con años de experiencia
-            const yearsConfig = siteData.config.find(c => c.key === "years_experience");
-            const suffixConfig = siteData.config.find(c => c.key === "counter_suffix");
-            
-            const years = yearsConfig ? yearsConfig.value : 5;
-            const suffix = suffixConfig ? suffixConfig.value : " años de experiencia";
-            
-            const descriptionElement = document.getElementById('counterDescription');
-            if (descriptionElement) {
-                descriptionElement.textContent = 
-                    `Vehículos americanos importados exitosamente desde USA a Arica (${years}${suffix})`;
+    }
+    
+    function generateDefaultGallery(baseImage) {
+        const defaultImages = [
+            baseImage || 'https://via.placeholder.com/800x600?text=Vehículo',
+            'https://images.unsplash.com/photo-1563720223485-8d6d5c5c8b9a?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
+            'https://images.unsplash.com/photo-1553440569-bcc63803a83d?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
+            'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80'
+        ];
+        return defaultImages.slice(0, 4);
+    }
+    
+    function generateDefaultKits(baseImage) {
+        return [
+            {
+                id: 'basic',
+                name: 'Básico',
+                level: 'basic',
+                price: 0,
+                description: 'Configuración estándar de fábrica',
+                features: ['Equipamiento original', 'Garantía de fábrica'],
+                image: baseImage || 'https://via.placeholder.com/800x600?text=Kit+Básico'
             }
-        }
-
-        function animateCounter() {
-            const counterElement = document.getElementById('importedVehiclesCounter');
-            if (!counterElement) return;
+        ];
+    }
+    
+    // ========== 2. ACTUALIZACIÓN DE UI CON CONTROL DE ERRORES ==========
+    
+    function updateUI() {
+        try {
+            // Actualizar contadores del hero (SI existen)
+            safeUpdate(() => updateStockCounts());
             
-            const targetNumber = parseInt(counterElement.textContent) || 142;
-            const duration = 2000;
-            const steps = 60;
-            const increment = targetNumber / steps;
-            let current = 0;
-            let step = 0;
-            
-            // Si ya tiene el número, no animar
-            if (counterElement.textContent == targetNumber) return;
-            
-            const timer = setInterval(() => {
-                step++;
-                current = Math.min(Math.floor(increment * step), targetNumber);
-                counterElement.textContent = current;
-                
-                if (step >= steps) {
-                    clearInterval(timer);
-                    counterElement.textContent = targetNumber;
+            // Actualizar sección de vehículos (SI existen datos)
+            safeUpdate(() => {
+                if (siteData.vehicles && siteData.vehicles.length > 0) {
+                    loadVehicles(currentFilter);
+                } else {
+                    showNoVehiclesMessage();
                 }
-            }, duration / steps);
+            });
+            
+            // Actualizar testimonios (SI existen)
+            safeUpdate(() => {
+                if (siteData.testimonials && siteData.testimonials.length > 0) {
+                    loadTestimonials();
+                } else {
+                    hideSection('testimonials');
+                }
+            });
+            
+            // Actualizar Instagram (SI existen)
+            safeUpdate(() => {
+                if (siteData.instagram && siteData.instagram.length > 0) {
+                    loadInstagram();
+                } else {
+                    hideSection('instagram');
+                }
+            });
+            
+            // Actualizar contador principal (SI existe)
+            safeUpdate(() => {
+                if (siteData.counters && siteData.counters.length > 0) {
+                    updateCounterSection();
+                    animateCounter();
+                }
+            });
+            
+            // Actualizar información de contacto (SI existe)
+            safeUpdate(() => {
+                if (siteData.config && siteData.config.length > 0) {
+                    updateContactInfo();
+                }
+            });
+            
+        } catch (error) {
+            console.error('❌ Error actualizando UI:', error);
         }
-
-        // ========== FUNCIONES DE VEHÍCULOS ==========
-
-        function loadVehicles(filter = "all") {
+    }
+    
+    function safeUpdate(callback) {
+        try {
+            callback();
+        } catch (error) {
+            console.warn('⚠️ Error en actualización parcial:', error.message);
+        }
+    }
+    
+    function hideSection(sectionId) {
+        const section = document.getElementById(sectionId);
+        if (section) {
+            section.style.display = 'none';
+        }
+    }
+    
+    function showNoVehiclesMessage() {
+        const container = document.getElementById('vehiclesContainer');
+        if (container) {
+            container.innerHTML = `
+                <div style="text-align: center; grid-column: 1 / -1; padding: 40px; color: #86868b;">
+                    <i class="fas fa-info-circle" style="font-size: 48px; margin-bottom: 20px;"></i>
+                    <h3 style="font-size: 21px; margin-bottom: 12px;">No hay vehículos disponibles por el momento</h3>
+                    <p>Estamos actualizando nuestro inventario. Por favor, contáctanos para más información.</p>
+                    <button onclick="contactVehicle(0)" class="button" style="margin-top: 20px;">
+                        <i class="fab fa-whatsapp"></i> Contactar
+                    </button>
+                </div>
+            `;
+        }
+    }
+    
+    // ========== 3. FUNCIONES PRINCIPALES (VERSIÓN SEGURA) ==========
+    
+    function updateStockCounts() {
+        const vehicles = siteData.vehicles || [];
+        const stock = vehicles.filter(v => v.status === 'stock').length;
+        const transit = vehicles.filter(v => v.status === 'transit').length;
+        const reserve = vehicles.filter(v => v.status === 'reserve').length;
+        
+        safeUpdate(() => {
+            document.getElementById('stockCount').textContent = stock;
+            document.getElementById('transitCount').textContent = transit;
+            document.getElementById('reserveCount').textContent = reserve;
+        });
+    }
+    
+    function loadVehicles(filter = "all") {
+        safeUpdate(() => {
             const container = document.getElementById('vehiclesContainer');
             if (!container) return;
             
-            currentFilter = filter;
-            let filteredVehicles = siteData.vehicles || [];
-            
+            let filtered = siteData.vehicles || [];
             if (filter !== "all") {
-                filteredVehicles = filteredVehicles.filter(v => v.status === filter);
+                filtered = filtered.filter(v => v.status === filter);
             }
             
-            // Actualizar botones activos
-            document.querySelectorAll('.filter-button').forEach(btn => {
-                const filterText = btn.textContent.toLowerCase();
-                const isActive = 
-                    (filter === "all" && filterText === "todos") || 
-                    (filter === "stock" && filterText === "en stock") ||
-                    (filter === "transit" && filterText === "en tránsito") ||
-                    (filter === "reserve" && filterText === "para reservar");
-                
-                if (isActive) {
-                    btn.classList.add('active');
-                } else {
-                    btn.classList.remove('active');
-                }
-            });
-            
-            // Si no hay vehículos
-            if (filteredVehicles.length === 0) {
-                container.innerHTML = `
-                    <div style="text-align: center; grid-column: 1 / -1; padding: 60px; color: #86868b;">
-                        <i class="fas fa-car" style="font-size: 48px; margin-bottom: 20px; opacity: 0.3;"></i>
-                        <h3 style="font-size: 21px; margin-bottom: 12px;">No hay vehículos ${filter !== 'all' ? 'en esta categoría' : 'disponibles'}</h3>
-                        <p>Pronto tendremos nuevos vehículos disponibles.</p>
-                    </div>
-                `;
+            if (filtered.length === 0) {
+                showNoVehiclesMessage();
                 return;
             }
             
-            // Renderizar vehículos
-            container.innerHTML = filteredVehicles.map(vehicle => {
-                const validatedVehicle = validateVehicleData(vehicle);
-                const statusBadge = validatedVehicle.status === 'stock' ? 
-                    'status-badge-stock' : validatedVehicle.status === 'transit' ? 
-                    'status-badge-transit' : 'status-badge-reserve';
-                
-                const statusText = validatedVehicle.status === 'stock' ? 
-                    'En Stock Arica' : validatedVehicle.status === 'transit' ? 
-                    'En Tránsito' : 'Para Reservar';
-                
-                return `
-                    <div class="vehicle-card">
-                        <img src="${validatedVehicle.baseImage || 'https://via.placeholder.com/800x600?text=Vehículo'}" 
-                             alt="${validatedVehicle.name}" 
-                             class="vehicle-image" 
-                             onclick="openInstagramGallery(${validatedVehicle.id}); trackEvent('click', 'Gallery', '${validatedVehicle.name.replace(/'/g, "\\'")}')"
-                             onerror="this.src='https://via.placeholder.com/800x600?text=Imagen+No+Disponible'">
-                        <div class="vehicle-info">
-                            <div class="vehicle-status ${statusBadge}">
-                                ${statusText}
-                            </div>
-                            <h3 class="vehicle-title">${validatedVehicle.name}</h3>
-                            <div class="vehicle-price">$${formatPrice(validatedVehicle.price)} CLP</div>
-                            <p style="color: #86868b; font-size: 14px; margin-bottom: 16px;">${validatedVehicle.description}</p>
-                            
-                            ${validatedVehicle.transitTime ? `
-                                <div class="transit-timer">
-                                    <div class="timer-icon">
-                                        <i class="fas fa-shipping-fast"></i>
-                                    </div>
-                                    <div>
-                                        <div class="timer-text">Llega en</div>
-                                        <div class="timer-display" id="timer-${validatedVehicle.id}">${validatedVehicle.transitTime} días</div>
-                                    </div>
-                                </div>
-                            ` : ''}
-                            
-                            <div style="display: flex; gap: 8px; margin-top: 16px;">
-                                <button class="button" onclick="showVehicleDetails(${validatedVehicle.id}); trackEvent('click', 'Vehicle', '${validatedVehicle.name.replace(/'/g, "\\'")} Details')" style="flex: 1;">
-                                    Ver Detalles
-                                </button>
-                                <button class="button button-outline" onclick="customizeVehicle(${validatedVehicle.id}); trackEvent('click', 'Customize', '${validatedVehicle.name.replace(/'/g, "\\'")}')" style="flex: 1;">
-                                    Personalizar
-                                </button>
-                            </div>
+            container.innerHTML = filtered.map(vehicle => `
+                <div class="vehicle-card">
+                    <img src="${vehicle.baseImage}" 
+                         alt="${vehicle.name}"
+                         class="vehicle-image"
+                         onclick="openVehicleGallery(${vehicle.id})"
+                         onerror="this.src='https://via.placeholder.com/800x600?text=Vehículo'">
+                    <div class="vehicle-info">
+                        <div class="vehicle-status ${vehicle.status === 'stock' ? 'status-badge-stock' : 
+                                                   vehicle.status === 'transit' ? 'status-badge-transit' : 
+                                                   'status-badge-reserve'}">
+                            ${vehicle.status === 'stock' ? 'En Stock Arica' : 
+                             vehicle.status === 'transit' ? 'En Tránsito' : 'Para Reservar'}
                         </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function validateVehicleData(vehicle) {
-            // Asegurar que el vehículo tenga todos los campos necesarios
-            const defaultVehicle = {
-                id: 0,
-                name: 'Vehículo no especificado',
-                price: 0,
-                status: 'stock',
-                location: 'Arica',
-                type: 'general',
-                description: 'Sin descripción',
-                eta: 'Consultar',
-                transitTime: null,
-                baseImage: 'https://via.placeholder.com/800x600?text=Vehículo',
-                gallery: [],
-                videoId: null,
-                specifications: {},
-                kits: [],
-                active: true
-            };
-            
-            const mergedVehicle = { ...defaultVehicle, ...vehicle };
-            
-            // Validar gallery - asegurar 8 imágenes
-            let gallery = Array.isArray(mergedVehicle.gallery) ? mergedVehicle.gallery : [];
-            while (gallery.length < 8) {
-                gallery.push(`https://via.placeholder.com/800x600?text=${mergedVehicle.name.replace(/ /g, '+')}+${gallery.length + 1}`);
-            }
-            mergedVehicle.gallery = gallery.slice(0, 8);
-            
-            // Validar kits - asegurar al menos uno
-            let kits = Array.isArray(mergedVehicle.kits) ? mergedVehicle.kits : [];
-            if (kits.length === 0) {
-                kits = [{
-                    id: 'default',
-                    name: 'Básico',
-                    level: 'basic',
-                    price: 0,
-                    description: 'Configuración estándar',
-                    features: ['Equipamiento de fábrica'],
-                    image: mergedVehicle.baseImage
-                }];
-            }
-            mergedVehicle.kits = kits;
-            
-            // Validar specifications
-            if (typeof mergedVehicle.specifications !== 'object' || mergedVehicle.specifications === null) {
-                mergedVehicle.specifications = {
-                    motor: 'No especificado',
-                    potencia: 'No especificado',
-                    transmision: 'No especificado',
-                    traccion: 'No especificado',
-                    combustible: 'No especificado',
-                    color: 'No especificado'
-                };
-            }
-            
-            return mergedVehicle;
-        }
-
-        function filterVehicles(filter) {
-            currentFilter = filter;
-            trackEvent('filter', 'Vehicles', filter);
-            loadVehicles(filter);
-        }
-
-        function setupFilters() {
-            document.querySelectorAll('.filter-button').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const text = this.textContent.toLowerCase();
-                    let filter = "all";
-                    
-                    if (text === "en stock") filter = "stock";
-                    else if (text === "en tránsito") filter = "transit";
-                    else if (text === "para reservar") filter = "reserve";
-                    
-                    filterVehicles(filter);
-                });
-            });
-        }
-
-        function updateTransitTimers() {
-            const transitVehicles = siteData.vehicles.filter(v => v.status === "transit" && v.transitTime);
-            
-            transitVehicles.forEach(vehicle => {
-                const timerElement = document.getElementById(`timer-${vehicle.id}`);
-                if (timerElement && vehicle.transitTime) {
-                    // Simular cuenta regresiva
-                    let daysLeft = vehicle.transitTime;
-                    
-                    const updateTimer = () => {
-                        if (daysLeft > 0) {
-                            timerElement.textContent = `${daysLeft} ${daysLeft === 1 ? 'día' : 'días'}`;
-                            
-                            // Cambiar color según días restantes
-                            if (daysLeft <= 5) {
-                                timerElement.style.color = 'var(--green)';
-                            } else if (daysLeft <= 10) {
-                                timerElement.style.color = 'var(--orange)';
-                            }
-                        } else {
-                            timerElement.textContent = '¡Próxima semana!';
-                            timerElement.style.color = 'var(--green)';
-                        }
-                    };
-                    
-                    updateTimer();
-                }
-            });
-        }
-
-        // ========== FUNCIONES DE TESTIMONIOS ==========
-
-        function loadTestimonials() {
-            const container = document.getElementById('testimonialsContainer');
-            if (!container) return;
-            
-            const testimonials = siteData.testimonials || [];
-            
-            if (testimonials.length === 0) {
-                container.innerHTML = `
-                    <div style="text-align: center; grid-column: 1 / -1; padding: 40px; color: #86868b;">
-                        <i class="fas fa-comment-dots" style="font-size: 48px; margin-bottom: 20px; opacity: 0.3;"></i>
-                        <h3 style="font-size: 21px; margin-bottom: 12px;">Próximamente más testimonios</h3>
-                        <p>Nuestros clientes están muy satisfechos. ¡Sé el próximo en compartir tu experiencia!</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            container.innerHTML = testimonials.map(testimonial => {
-                const rating = testimonial.rating || 5;
-                return `
-                    <div class="testimonial-card">
-                        <div class="testimonial-header">
-                            <img src="${testimonial.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?ixlib=rb-4.0.3&auto=format&fit=crop&w=200&q=80'}" 
-                                 alt="${testimonial.name}" 
-                                 class="testimonial-avatar"
-                                 onerror="this.src='https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?ixlib=rb-4.0.3&auto=format&fit=crop&w=200&q=80'">
-                            <div class="testimonial-info">
-                                <h4>${testimonial.name || 'Cliente'}</h4>
-                                <p>${testimonial.vehicle || 'Importó vehículo americano'}</p>
-                            </div>
-                        </div>
-                        <p class="testimonial-text">"${testimonial.text || 'Excelente servicio y atención profesional.'}"</p>
-                        <div class="testimonial-rating">
-                            ${generateStars(rating)}
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function generateStars(rating) {
-            let stars = '';
-            const fullStars = Math.floor(rating);
-            const hasHalfStar = rating % 1 !== 0;
-            
-            for (let i = 1; i <= 5; i++) {
-                if (i <= fullStars) {
-                    stars += '<i class="fas fa-star"></i>';
-                } else if (hasHalfStar && i === fullStars + 1) {
-                    stars += '<i class="fas fa-star-half-alt"></i>';
-                } else {
-                    stars += '<i class="far fa-star"></i>';
-                }
-            }
-            return stars;
-        }
-
-        // ========== FUNCIONES DE INSTAGRAM ==========
-
-        function loadInstagram() {
-            const container = document.getElementById('instagramContainer');
-            const profileLink = document.getElementById('instagramProfileLink');
-            if (!container) return;
-            
-            const posts = siteData.instagram || [];
-            const instagramUrl = siteData.config.find(c => c.key === 'instagram_url')?.value || 'https://instagram.com';
-            
-            // Actualizar enlace del perfil
-            if (profileLink) {
-                profileLink.href = instagramUrl;
-            }
-            
-            if (posts.length === 0) {
-                // Mostrar placeholders
-                container.innerHTML = Array.from({ length: 6 }, (_, i) => `
-                    <div class="instagram-post">
-                        <div style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #86868b;">
-                            <i class="fab fa-instagram" style="font-size: 32px; margin-bottom: 12px;"></i>
-                            <p style="font-size: 12px;">Imagen ${i + 1}</p>
-                        </div>
-                    </div>
-                `).join('');
-                return;
-            }
-            
-            // Ordenar por order si existe
-            const sortedPosts = [...posts].sort((a, b) => (a.order || 0) - (b.order || 0));
-            
-            container.innerHTML = sortedPosts.slice(0, 6).map(post => `
-                <a href="${post.link || instagramUrl}" 
-                   target="_blank" 
-                   class="instagram-post" 
-                   onclick="trackEvent('click', 'Social', 'Instagram Post')">
-                    <img src="${post.image_url}" 
-                         alt="${post.alt_text || 'Instagram'}" 
-                         class="instagram-image"
-                         onerror="this.src='https://via.placeholder.com/400x400?text=Instagram'">
-                    <div class="instagram-overlay">
-                        <i class="fab fa-instagram instagram-icon"></i>
-                    </div>
-                </a>
-            `).join('');
-        }
-
-        // ========== FUNCIONES DE CONTACTO Y CONFIGURACIÓN ==========
-
-        function updateContactInfo() {
-            const configMap = {};
-            siteData.config.forEach(item => {
-                configMap[item.key] = item.value;
-            });
-            
-            // Actualizar WhatsApp
-            const whatsappBtn = document.getElementById('whatsappButton');
-            if (whatsappBtn && configMap.whatsapp_number) {
-                const defaultMessage = "Hola, estoy interesado en importar un vehículo desde USA. ¿Podrían darme más información?";
-                whatsappBtn.href = `https://wa.me/${configMap.whatsapp_number}?text=${encodeURIComponent(defaultMessage)}`;
-            }
-            
-            // Actualizar información de contacto en footer
-            const contactInfo = document.getElementById('contactInfo');
-            if (contactInfo) {
-                let html = '';
-                
-                if (configMap.address) {
-                    html += `<p>📍 ${configMap.address}</p>`;
-                } else {
-                    html += `<p>📍 Av. Principal 1234, Arica, Chile</p>`;
-                }
-                
-                if (configMap.phone) {
-                    html += `<p>📞 ${configMap.phone}</p>`;
-                } else {
-                    html += `<p>📞 +56 9 3865 4827</p>`;
-                }
-                
-                if (configMap.email) {
-                    html += `<p>✉️ ${configMap.email}</p>`;
-                } else {
-                    html += `<p>✉️ contacto@importamericancars.cl</p>`;
-                }
-                
-                contactInfo.innerHTML = html;
-            }
-        }
-
-        function updateHeroContent() {
-            const heroTitle = document.getElementById('heroTitle');
-            const heroSubtitle = document.getElementById('heroSubtitle');
-            
-            const titleConfig = siteData.config.find(c => c.key === 'hero_title');
-            const subtitleConfig = siteData.config.find(c => c.key === 'hero_subtitle');
-            
-            if (heroTitle && titleConfig && titleConfig.value) {
-                heroTitle.textContent = titleConfig.value;
-            }
-            
-            if (heroSubtitle && subtitleConfig && subtitleConfig.value) {
-                heroSubtitle.textContent = subtitleConfig.value;
-            }
-        }
-
-        // ========== FUNCIONES DE MODALES ==========
-
-        function showVehicleDetails(vehicleId) {
-            const vehicle = siteData.vehicles.find(v => v.id == vehicleId);
-            if (!vehicle) {
-                alert('Vehículo no encontrado');
-                return;
-            }
-            
-            selectedVehicle = validateVehicleData(vehicle);
-            currentGalleryIndex = 0;
-            
-            trackEvent('view', 'Vehicle Details', selectedVehicle.name);
-            
-            const modalContent = document.getElementById('vehicleDetailsContent');
-            modalContent.innerHTML = `
-                <div class="customization-container">
-                    <div class="customization-options">
-                        <h2 style="font-size: 28px; font-weight: 700; margin-bottom: 8px;">${selectedVehicle.name}</h2>
-                        <p style="color: #86868b; margin-bottom: 24px;">${selectedVehicle.description}</p>
+                        <h3 class="vehicle-title">${vehicle.name}</h3>
+                        <div class="vehicle-price">$${formatPrice(vehicle.price)} CLP</div>
+                        <p style="color: #86868b; font-size: 14px; margin-bottom: 16px;">${vehicle.description}</p>
                         
-                        <div class="vehicle-gallery">
-                            <div class="main-image-container">
-                                <img src="${selectedVehicle.gallery[0]}" 
-                                     alt="${selectedVehicle.name}" 
-                                     class="main-image" 
-                                     id="mainGalleryImage" 
-                                     onclick="openInstagramGallery(${selectedVehicle.id})"
-                                     onerror="this.src='https://via.placeholder.com/800x600?text=Imagen+No+Disponible'">
-                            </div>
-                            
-                            <div class="gallery-thumbnails" id="galleryThumbnails">
-                                ${selectedVehicle.gallery.map((img, index) => `
-                                    <img src="${img}" 
-                                         alt="Vista ${index + 1}" 
-                                         class="thumbnail ${index === 0 ? 'active' : ''}" 
-                                         onclick="changeGalleryImage(${index}, ${selectedVehicle.id})"
-                                         onerror="this.src='https://via.placeholder.com/80x80?text=Img+${index + 1}'">
-                                `).join('')}
-                            </div>
-                            
-                            ${selectedVehicle.videoId ? `
-                                <div class="video-container">
-                                    <iframe src="https://www.youtube.com/embed/${selectedVehicle.videoId}" 
-                                            title="Video de ${selectedVehicle.name}" 
-                                            frameborder="0" 
-                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-                                            allowfullscreen>
-                                    </iframe>
+                        ${vehicle.transitTime ? `
+                            <div class="transit-timer">
+                                <div class="timer-icon"><i class="fas fa-shipping-fast"></i></div>
+                                <div>
+                                    <div class="timer-text">Llega en</div>
+                                    <div class="timer-display">${vehicle.transitTime} días</div>
                                 </div>
-                            ` : ''}
-                        </div>
-                        
-                        <h3 style="font-size: 17px; font-weight: 600; margin-bottom: 20px;">Especificaciones Técnicas</h3>
-                        <div style="background: var(--gray-50); padding: 24px; border-radius: var(--radius); margin-bottom: 32px;">
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
-                                ${Object.entries(selectedVehicle.specifications).map(([key, value]) => `
-                                    <div style="margin-bottom: 12px;">
-                                        <div style="font-size: 12px; color: #86868b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">
-                                            ${key.replace(/_/g, ' ')}
-                                        </div>
-                                        <div style="font-weight: 500;">${value}</div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                        
-                        <div style="display: flex; gap: 12px;">
-                            <button class="button" onclick="contactVehicle(${selectedVehicle.id}); trackEvent('click', 'Contact', '${selectedVehicle.name.replace(/'/g, "\\'")}')" style="flex: 1;">
-                                <i class="fab fa-whatsapp"></i> Consultar Disponibilidad
-                            </button>
-                            <button class="button button-outline" onclick="customizeVehicle(${selectedVehicle.id}); trackEvent('click', 'Customize', '${selectedVehicle.name.replace(/'/g, "\\'")} From Details')" style="flex: 1;">
-                                <i class="fas fa-cog"></i> Personalizar
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="customization-summary">
-                        <h3 style="font-size: 17px; font-weight: 600; margin-bottom: 24px;">Resumen</h3>
-                        
-                        <div style="margin-bottom: 24px;">
-                            <div style="font-size: 13px; color: #86868b; margin-bottom: 8px;">Precio</div>
-                            <div style="font-size: 32px; font-weight: 700;">$${formatPrice(selectedVehicle.price)} CLP</div>
-                            <div style="color: #86868b; font-size: 14px; margin-top: 4px;">${selectedVehicle.location} • ${selectedVehicle.eta}</div>
-                        </div>
-                        
-                        <div style="margin-bottom: 24px;">
-                            <div class="vehicle-status ${selectedVehicle.status === 'stock' ? 'status-badge-stock' : selectedVehicle.status === 'transit' ? 'status-badge-transit' : 'status-badge-reserve'}" style="margin-bottom: 16px;">
-                                ${selectedVehicle.status === 'stock' ? 'Disponible para entrega inmediata' : selectedVehicle.status === 'transit' ? 'En camino desde USA' : 'Disponible para reserva'}
-                            </div>
-                            
-                            <div style="font-size: 14px; color: #86868b; line-height: 1.6;">
-                                <div style="display: flex; align-items: center; margin-bottom: 8px;">
-                                    <i class="fas fa-shield-alt" style="color: var(--import-red); margin-right: 8px;"></i>
-                                    <span>Garantía de 6 meses</span>
-                                </div>
-                                <div style="display: flex; align-items: center; margin-bottom: 8px;">
-                                    <i class="fas fa-tools" style="color: var(--import-red); margin-right: 8px;"></i>
-                                    <span>Inspección completa realizada</span>
-                                </div>
-                                <div style="display: flex; align-items: center;">
-                                    <i class="fas fa-file-contract" style="color: var(--import-red); margin-right: 8px;"></i>
-                                    <span>Documentación en regla</span>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div style="border-top: var(--border); padding-top: 20px;">
-                            <h4 style="font-size: 15px; font-weight: 600; margin-bottom: 12px;">Incluye</h4>
-                            <div style="font-size: 14px; color: #86868b; line-height: 1.6;">
-                                <div>• Revisión mecánica completa</div>
-                                <div>• Limpieza y detailing profesional</div>
-                                <div>• Certificado de origen USA</div>
-                                <div>• Asesoría en legalización</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            document.getElementById('vehicleDetailsModal').style.display = 'block';
-            document.body.style.overflow = 'hidden';
-        }
-
-        function changeGalleryImage(index, vehicleId) {
-            const vehicle = siteData.vehicles.find(v => v.id == vehicleId);
-            if (!vehicle) return;
-            
-            currentGalleryIndex = index;
-            const validatedVehicle = validateVehicleData(vehicle);
-            
-            document.getElementById('mainGalleryImage').src = validatedVehicle.gallery[index];
-            
-            document.querySelectorAll('#galleryThumbnails .thumbnail').forEach((thumb, i) => {
-                thumb.classList.toggle('active', i === index);
-            });
-            
-            trackEvent('click', 'Gallery Thumbnail', `Image ${index + 1}`);
-        }
-
-        function customizeVehicle(vehicleId) {
-            const vehicle = siteData.vehicles.find(v => v.id == vehicleId);
-            if (!vehicle) {
-                alert('Vehículo no encontrado');
-                return;
-            }
-            
-            selectedVehicle = validateVehicleData(vehicle);
-            selectedKit = selectedVehicle.kits[0];
-            
-            trackEvent('open', 'Customization', selectedVehicle.name);
-            
-            const modalContent = document.getElementById('customizationContent');
-            const isMobile = window.innerWidth <= 768;
-            
-            modalContent.innerHTML = `
-                <div class="customization-options">
-                    <h2 style="font-size: 28px; font-weight: 700; margin-bottom: 8px;">Personalizar ${selectedVehicle.name}</h2>
-                    <p style="color: #86868b; margin-bottom: 32px;">${selectedVehicle.description}</p>
-                    
-                    <!-- COMPARACIÓN VISUAL -->
-                    ${isMobile ? `
-                        <div class="mobile-compact-comparison">
-                            <div class="compact-image-container">
-                                <div class="compact-label">Original</div>
-                                <img src="${selectedVehicle.baseImage}" 
-                                     alt="Vehículo base" 
-                                     class="comparison-image" 
-                                     id="mobileBaseImage"
-                                     onerror="this.src='https://via.placeholder.com/400x300?text=Vehículo+Base'">
-                            </div>
-                            
-                            <div class="compact-image-container">
-                                <div class="compact-label" id="mobileKitLabel">${selectedKit.name}</div>
-                                <img src="${selectedKit.image || selectedVehicle.baseImage}" 
-                                     alt="Vehículo personalizado" 
-                                     class="comparison-image" 
-                                     id="mobileCustomImage"
-                                     onerror="this.src='https://via.placeholder.com/400x300?text=Personalizado'">
-                            </div>
-                        </div>
-                    ` : `
-                        <div class="visual-comparison">
-                            <div class="comparison-image-container">
-                                <div class="comparison-label">Vehículo Base</div>
-                                <img src="${selectedVehicle.baseImage}" 
-                                     alt="Vehículo base" 
-                                     class="comparison-image" 
-                                     id="baseImage"
-                                     onerror="this.src='https://via.placeholder.com/600x400?text=Vehículo+Base'">
-                            </div>
-                            
-                            <div class="comparison-image-container">
-                                <div class="comparison-label">Con Kit: <span id="currentKitName">${selectedKit.name}</span></div>
-                                <img src="${selectedKit.image || selectedVehicle.baseImage}" 
-                                     alt="Vehículo personalizado" 
-                                     class="comparison-image" 
-                                     id="customizedImage"
-                                     onerror="this.src='https://via.placeholder.com/600x400?text=Personalizado'">
-                            </div>
-                        </div>
-                    `}
-                    
-                    <!-- PESTAÑAS DE KITS LATERALES -->
-                    <h3 style="font-size: 17px; font-weight: 600; margin-bottom: 20px; margin-top: ${isMobile ? '20px' : '0'};">Selecciona un Kit</h3>
-                    <div class="kit-tabs-container" id="kitTabsContainer">
-                        ${selectedVehicle.kits.map(kit => `
-                            <div class="kit-tab" 
-                                 onclick="selectKit('${kit.id}', '${kit.image || selectedVehicle.baseImage}', '${kit.name.replace(/'/g, "\\'")}', '${kit.description.replace(/'/g, "\\'")}', ${kit.price})"
-                                 data-kit-id="${kit.id}">
-                                <div class="kit-tab-content">
-                                    <div class="kit-tab-badge ${kit.level || 'basic'}">${kit.name}</div>
-                                    <div class="kit-tab-name">${kit.description.split(' - ')[0] || kit.description}</div>
-                                </div>
-                                <div class="kit-tab-price ${kit.price === 0 ? 'included' : ''}">
-                                    ${kit.price > 0 ? `+$${formatPrice(kit.price)}` : 'Incluido'}
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                    
-                    <!-- DETALLES DE LA PERSONALIZACIÓN SELECCIONADA -->
-                    <div class="customization-details" id="customizationDetails">
-                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px;">
-                            <div>
-                                <h4 style="font-size: 15px; font-weight: 600; margin-bottom: 4px;">Kit ${selectedKit.name}</h4>
-                                <p style="font-size: 13px; color: #86868b;">${selectedKit.description}</p>
-                            </div>
-                            <div style="font-size: 18px; font-weight: 700; color: ${selectedKit.price > 0 ? 'var(--import-red)' : '#86868b'}">
-                                ${selectedKit.price > 0 ? `+$${formatPrice(selectedKit.price)}` : 'Incluido'}
-                            </div>
-                        </div>
-                        
-                        <div style="font-size: 13px; color: #86868b; margin-bottom: 8px;">Incluye:</div>
-                        <div class="customization-features" id="kitFeatures">
-                            ${(selectedKit.features || []).map(feature => `
-                                <div class="customization-feature">
-                                    <i class="fas fa-check"></i>
-                                    <span>${feature}</span>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                    
-                    <!-- BOTONES DE ACCIÓN -->
-                    <div style="display: flex; gap: 12px; margin-top: 32px; flex-direction: ${isMobile ? 'column' : 'row'}">
-                        <button class="button" onclick="requestCustomization(); trackEvent('click', 'Request Quote', '${selectedVehicle.name.replace(/'/g, "\\'")}')" style="flex: 1;">
-                            <i class="fab fa-whatsapp"></i> Solicitar Cotización
-                        </button>
-                        <button class="button button-outline" onclick="showVehicleDetails(${selectedVehicle.id}); trackEvent('click', 'View Details', '${selectedVehicle.name.replace(/'/g, "\\'")}')" style="flex: 1;">
-                            <i class="fas fa-info-circle"></i> Ver Detalles del Vehículo
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- RESUMEN Y PRECIO -->
-                <div class="customization-summary">
-                    <h3 style="font-size: 17px; font-weight: 600; margin-bottom: 24px;">Tu Configuración</h3>
-                    
-                    <div style="margin-bottom: 24px;">
-                        <div style="font-size: 13px; color: #86868b; margin-bottom: 8px;">Vehículo base</div>
-                        <div style="font-weight: 500; font-size: ${isMobile ? '15px' : 'inherit'}">${selectedVehicle.name}</div>
-                        <div style="font-size: ${isMobile ? '24px' : '21px'}; font-weight: 700; margin-top: 4px; color: var(--black);">$${formatPrice(selectedVehicle.price)} CLP</div>
-                    </div>
-                    
-                    <div style="margin-bottom: 24px;">
-                        <div style="font-size: 13px; color: #86868b; margin-bottom: 8px;">Personalización</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                            <div>
-                                <div style="font-weight: 500; font-size: ${isMobile ? '15px' : 'inherit'}">Kit ${selectedKit.name}</div>
-                                <div style="font-size: 12px; color: #86868b;">${selectedKit.description}</div>
-                            </div>
-                            <div style="font-size: ${isMobile ? '18px' : '17px'}; font-weight: 600; color: ${selectedKit.price > 0 ? 'var(--import-red)' : '#86868b'}">
-                                ${selectedKit.price > 0 ? `+$${formatPrice(selectedKit.price)}` : 'Incluido'}
-                            </div>
-                        </div>
-                        
-                        <!-- LISTA DE CARACTERÍSTICAS EN RESUMEN -->
-                        <div style="background: rgba(99, 11, 11, 0.05); padding: 16px; border-radius: var(--radius); margin-top: 16px;">
-                            <div style="font-size: 12px; color: var(--import-red); font-weight: 500; margin-bottom: 8px;">Agregados al vehículo:</div>
-                            <div style="font-size: 11px; color: var(--black); line-height: 1.5;">
-                                ${(selectedKit.features || []).slice(0, 4).map(f => `<div style="margin-bottom: 4px;">• ${f}</div>`).join('')}
-                                ${(selectedKit.features || []).length > 4 ? '<div style="color: #86868b;">+ ' + ((selectedKit.features || []).length - 4) + ' características más</div>' : ''}
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div style="border-top: var(--border); padding-top: 20px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div style="font-weight: 600; font-size: 17px;">Total</div>
-                            <div style="font-size: ${isMobile ? '28px' : '32px'}; font-weight: 700;" id="totalPrice">
-                                $${formatPrice(selectedVehicle.price + (selectedKit.price || 0))} CLP
-                            </div>
-                        </div>
-                        <div style="font-size: 12px; color: #86868b; margin-top: 8px;">
-                            Incluye instalación profesional y garantía de 6 meses
-                        </div>
-                    </div>
-                    
-                    <div style="margin-top: 24px; padding: 16px; border-radius: var(--radius); border: 1px dashed var(--gray-200);">
-                        <div style="font-size: 13px; color: #86868b; margin-bottom: 8px;">Beneficios incluidos:</div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
-                            <div style="display: flex; align-items: center; gap: 4px;">
-                                <i class="fas fa-check" style="color: var(--import-red); font-size: 10px;"></i>
-                                <span>Instalación profesional</span>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 4px;">
-                                <i class="fas fa-check" style="color: var(--import-red); font-size: 10px;"></i>
-                                <span>Garantía 6 meses</span>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 4px;">
-                                <i class="fas fa-check" style="color: var(--import-red); font-size: 10px;"></i>
-                                <span>Accesorios USA</span>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 4px;">
-                                <i class="fas fa-check" style="color: var(--import-red); font-size: 10px;"></i>
-                                <span>Certificado original</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            // Marcar el primer kit como seleccionado
-            const firstKitTab = document.querySelector(`[data-kit-id="${selectedKit.id}"]`);
-            if (firstKitTab) {
-                firstKitTab.classList.add('selected');
-            }
-            
-            document.getElementById('customizationModal').style.display = 'block';
-            document.body.style.overflow = 'hidden';
-        }
-
-        function selectKit(kitId, kitImage, kitName, kitDescription, kitPrice) {
-            if (!selectedVehicle) return;
-            
-            const kit = selectedVehicle.kits.find(k => k.id === kitId);
-            if (!kit) return;
-            
-            selectedKit = kit;
-            
-            trackEvent('select', 'Kit', kitName);
-            
-            // Actualizar pestañas
-            document.querySelectorAll('#kitTabsContainer .kit-tab').forEach(item => {
-                item.classList.remove('selected');
-                if (item.getAttribute('data-kit-id') === kitId) {
-                    item.classList.add('selected');
-                }
-            });
-            
-            // Actualizar imagen personalizada
-            const isMobile = window.innerWidth <= 768;
-            
-            if (isMobile) {
-                const mobileCustomImage = document.getElementById('mobileCustomImage');
-                const mobileKitLabel = document.getElementById('mobileKitLabel');
-                
-                if (mobileCustomImage) {
-                    mobileCustomImage.src = kitImage;
-                }
-                
-                if (mobileKitLabel) {
-                    mobileKitLabel.textContent = kitName;
-                }
-            } else {
-                const customizedImage = document.getElementById('customizedImage');
-                const currentKitName = document.getElementById('currentKitName');
-                
-                if (customizedImage) {
-                    customizedImage.src = kitImage;
-                }
-                
-                if (currentKitName) {
-                    currentKitName.textContent = kitName;
-                }
-            }
-            
-            // Actualizar sección de detalles
-            updateCustomizationDetails();
-            
-            // Actualizar precio
-            updateTotalPrice();
-        }
-
-        function updateCustomizationDetails() {
-            if (!selectedKit) return;
-            
-            const detailsContainer = document.getElementById('customizationDetails');
-            if (!detailsContainer) return;
-            
-            detailsContainer.innerHTML = `
-                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px;">
-                    <div>
-                        <h4 style="font-size: 15px; font-weight: 600; margin-bottom: 4px;">Kit ${selectedKit.name}</h4>
-                        <p style="font-size: 13px; color: #86868b;">${selectedKit.description}</p>
-                    </div>
-                    <div style="font-size: 18px; font-weight: 700; color: ${selectedKit.price > 0 ? 'var(--import-red)' : '#86868b'}">
-                        ${selectedKit.price > 0 ? `+$${formatPrice(selectedKit.price)}` : 'Incluido'}
-                    </div>
-                </div>
-                
-                <div style="font-size: 13px; color: #86868b; margin-bottom: 8px;">Incluye:</div>
-                <div class="customization-features">
-                    ${(selectedKit.features || []).map(feature => `
-                        <div class="customization-feature">
-                            <i class="fas fa-check"></i>
-                            <span>${feature}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        }
-
-        function updateTotalPrice() {
-            if (!selectedVehicle || !selectedKit) return;
-            
-            const totalElement = document.getElementById('totalPrice');
-            if (!totalElement) return;
-            
-            const total = selectedVehicle.price + (selectedKit.price || 0);
-            const isMobile = window.innerWidth <= 768;
-            
-            totalElement.textContent = `$${formatPrice(total)} CLP`;
-            totalElement.style.fontSize = isMobile ? '28px' : '32px';
-        }
-
-        function showCustomizationModal() {
-            const modalContent = document.getElementById('customizationContent');
-            modalContent.innerHTML = `
-                <div class="customization-options">
-                    <h2 style="font-size: 28px; font-weight: 700; margin-bottom: 8px;">Simular Personalización</h2>
-                    <p style="color: #86868b; margin-bottom: 32px;">Selecciona un vehículo para comenzar</p>
-                    
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
-                        ${(siteData.vehicles || []).slice(0, 3).map(vehicle => {
-                            const validatedVehicle = validateVehicleData(vehicle);
-                            return `
-                                <div onclick="customizeVehicle(${validatedVehicle.id})" style="cursor: pointer; border: var(--border); border-radius: var(--radius); padding: 20px; text-align: center; transition: transform 0.3s;">
-                                    <img src="${validatedVehicle.baseImage}" 
-                                         style="width: 100%; height: 120px; object-fit: cover; border-radius: 6px; margin-bottom: 12px;"
-                                         onerror="this.src='https://via.placeholder.com/400x300?text=Vehículo'">
-                                    <div style="font-weight: 500; margin-bottom: 4px;">${validatedVehicle.name}</div>
-                                    <div style="font-size: 14px; color: #86868b; margin-bottom: 8px;">${validatedVehicle.description.split('•')[0]}</div>
-                                    <div style="font-size: 17px; font-weight: 600;">$${formatPrice(validatedVehicle.price)} CLP</div>
-                                </div>
-                            `;
-                        }).join('')}
-                        ${(siteData.vehicles || []).length === 0 ? `
-                            <div style="text-align: center; padding: 40px; color: #86868b; grid-column: 1 / -1;">
-                                <i class="fas fa-car" style="font-size: 48px; margin-bottom: 20px; opacity: 0.3;"></i>
-                                <p>No hay vehículos disponibles para personalizar.</p>
                             </div>
                         ` : ''}
-                    </div>
-                </div>
-                <div class="customization-summary">
-                    <h3 style="font-size: 17px; font-weight: 600; margin-bottom: 16px;">Beneficios</h3>
-                    <div style="color: #86868b; font-size: 14px; line-height: 1.8;">
-                        <div style="display: flex; align-items: start; margin-bottom: 16px;">
-                            <i class="fas fa-check" style="color: var(--import-red); margin-right: 12px; margin-top: 4px;"></i>
-                            <span>Accesorios USA originales</span>
-                        </div>
-                        <div style="display: flex; align-items: start; margin-bottom: 16px;">
-                            <i class="fas fa-check" style="color: var(--import-red); margin-right: 12px; margin-top: 4px;"></i>
-                            <span>Instalación profesional en Arica</span>
-                        </div>
-                        <div style="display: flex; align-items: start; margin-bottom: 16px;">
-                            <i class="fas fa-check" style="color: var(--import-red); margin-right: 12px; margin-top: 4px;"></i>
-                            <span>Garantía de 6 meses</span>
-                        </div>
-                        <div style="display: flex; align-items: start;">
-                            <i class="fas fa-check" style="color: var(--import-red); margin-right: 12px; margin-top: 4px;"></i>
-                            <span>Precio todo incluido</span>
+                        
+                        <div style="display: flex; gap: 8px; margin-top: 16px;">
+                            <button class="button" onclick="showVehicleDetails(${vehicle.id})" style="flex: 1;">
+                                Ver Detalles
+                            </button>
+                            <button class="button button-outline" onclick="customizeVehicle(${vehicle.id})" style="flex: 1;">
+                                Personalizar
+                            </button>
                         </div>
                     </div>
                 </div>
-            `;
-            
-            document.getElementById('customizationModal').style.display = 'block';
-            document.body.style.overflow = 'hidden';
-        }
-
-        // ========== FUNCIONES DE GALERÍA INSTAGRAM ==========
-
-        function openInstagramGallery(vehicleId) {
-            const vehicle = siteData.vehicles.find(v => v.id == vehicleId);
-            if (!vehicle) return;
-            
-            currentInstagramGallery = validateVehicleData(vehicle);
-            currentInstagramSlide = 0;
-            
-            trackEvent('open', 'Gallery', currentInstagramGallery.name);
-            
-            const modal = document.getElementById('instagramGalleryModal');
-            const slidesContainer = document.getElementById('gallerySlidesContainer');
-            const dotsContainer = document.getElementById('galleryDots');
-            
-            // Crear slides
-            slidesContainer.innerHTML = currentInstagramGallery.gallery.map((img, index) => `
-                <div class="gallery-slide ${index === 0 ? 'active' : ''}">
-                    <img src="${img}" 
-                         alt="${currentInstagramGallery.name} - Imagen ${index + 1}" 
-                         onclick="toggleZoom(this)"
-                         ondblclick="toggleZoom(this)"
-                         loading="lazy"
-                         onerror="this.src='https://via.placeholder.com/800x600?text=Imagen+${index + 1}'">
-                </div>
             `).join('');
-            
-            // Crear dots
-            dotsContainer.innerHTML = currentInstagramGallery.gallery.map((_, index) => `
-                <div class="gallery-dot ${index === 0 ? 'active' : ''}" onclick="goToSlide(${index})"></div>
-            `).join('');
-            
-            // Actualizar contador
-            updateGalleryCounter();
-            
-            // Mostrar modal
-            modal.style.display = 'block';
-            document.body.style.overflow = 'hidden';
-        }
-
-        function changeGallerySlide(direction) {
-            if (!currentInstagramGallery) return;
-            
-            const slides = document.querySelectorAll('.gallery-slide');
-            const dots = document.querySelectorAll('.gallery-dot');
-            
-            if (slides.length === 0) return;
-            
-            // Quitar zoom si está activo
-            const currentSlide = slides[currentInstagramSlide];
-            if (currentSlide) {
-                const img = currentSlide.querySelector('img');
-                if (img && img.classList.contains('zoomed')) {
-                    img.classList.remove('zoomed');
-                }
-            }
-            
-            // Calcular nuevo índice
-            const newIndex = (currentInstagramSlide + direction + slides.length) % slides.length;
-            
-            // Actualizar slides
-            slides[currentInstagramSlide].classList.remove('active');
-            slides[newIndex].classList.add('active');
-            
-            // Actualizar dots
-            if (dots[currentInstagramSlide]) dots[currentInstagramSlide].classList.remove('active');
-            if (dots[newIndex]) dots[newIndex].classList.add('active');
-            
-            currentInstagramSlide = newIndex;
-            updateGalleryCounter();
-            
-            trackEvent('navigation', 'Gallery', `Slide ${newIndex + 1}`);
-        }
-
-        function goToSlide(index) {
-            if (!currentInstagramGallery) return;
-            
-            const slides = document.querySelectorAll('.gallery-slide');
-            const dots = document.querySelectorAll('.gallery-dot');
-            
-            if (slides.length === 0 || index < 0 || index >= slides.length) return;
-            
-            // Quitar zoom si está activo
-            const currentSlide = slides[currentInstagramSlide];
-            if (currentSlide) {
-                const img = currentSlide.querySelector('img');
-                if (img && img.classList.contains('zoomed')) {
-                    img.classList.remove('zoomed');
-                }
-            }
-            
-            // Actualizar slides
-            slides[currentInstagramSlide].classList.remove('active');
-            slides[index].classList.add('active');
-            
-            // Actualizar dots
-            if (dots[currentInstagramSlide]) dots[currentInstagramSlide].classList.remove('active');
-            if (dots[index]) dots[index].classList.add('active');
-            
-            currentInstagramSlide = index;
-            updateGalleryCounter();
-        }
-
-        function toggleZoom(imgElement) {
-            imgElement.classList.toggle('zoomed');
-            trackEvent('zoom', 'Gallery', imgElement.classList.contains('zoomed') ? 'Zoom In' : 'Zoom Out');
-        }
-
-        function updateGalleryCounter() {
-            if (!currentInstagramGallery) return;
-            
-            const counter = document.getElementById('galleryCounter');
-            if (counter) {
-                counter.textContent = `${currentInstagramSlide + 1} / ${currentInstagramGallery.gallery.length}`;
-            }
-        }
-
-        function closeInstagramGallery() {
-            const modal = document.getElementById('instagramGalleryModal');
-            
-            // Quitar zoom si está activo
-            const currentSlide = document.querySelector('.gallery-slide.active');
-            if (currentSlide) {
-                const img = currentSlide.querySelector('img');
-                if (img && img.classList.contains('zoomed')) {
-                    img.classList.remove('zoomed');
-                }
-            }
-            
-            modal.style.display = 'none';
-            document.body.style.overflow = 'auto';
-            currentInstagramGallery = null;
-            currentInstagramSlide = 0;
-        }
-
-        function setupGalleryKeyboard() {
-            document.addEventListener('keydown', (e) => {
-                const galleryModal = document.getElementById('instagramGalleryModal');
-                if (galleryModal.style.display === 'block') {
-                    if (e.key === 'Escape') {
-                        closeInstagramGallery();
-                    } else if (e.key === 'ArrowRight') {
-                        changeGallerySlide(1);
-                    } else if (e.key === 'ArrowLeft') {
-                        changeGallerySlide(-1);
-                    } else if (e.key === ' ') {
-                        const activeSlide = document.querySelector('.gallery-slide.active');
-                        if (activeSlide) {
-                            const img = activeSlide.querySelector('img');
-                            if (img) {
-                                toggleZoom(img);
-                                e.preventDefault();
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        // ========== FUNCIONES DE WHATSAPP Y CONTACTO ==========
-
-        function contactVehicle(vehicleId) {
-            let vehicle;
-            let message;
-            
-            if (vehicleId === 0 || !vehicleId) {
-                // Contacto general
-                vehicle = { name: "Asesoría Personalizada", price: 0, status: "stock" };
-                message = `Hola, estoy interesado en recibir asesoría personalizada para importar un vehículo desde USA. ¿Podrían contactarme para conversar sobre mis necesidades?`;
-            } else {
-                vehicle = siteData.vehicles.find(v => v.id == vehicleId);
-                if (!vehicle) {
-                    alert('Vehículo no encontrado');
-                    return;
-                }
-                message = `Hola, estoy interesado en el vehículo: ${vehicle.name} ${vehicle.price > 0 ? `($${formatPrice(vehicle.price)} CLP)` : ''}. Estado: ${vehicle.status === 'stock' ? 'En Stock Arica' : vehicle.status === 'transit' ? 'En Tránsito' : 'Para Reservar'}. ¿Podrían darme más información?`;
-            }
-            
-            trackEvent('contact', 'WhatsApp', vehicle.name);
-            
-            // Obtener número de WhatsApp de la configuración
-            const whatsappNumber = siteData.config.find(c => c.key === 'whatsapp_number')?.value || '56938654827';
-            window.open(`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`, '_blank');
-        }
-
-        function requestCustomization() {
-            if (!selectedVehicle || !selectedKit) {
-                alert('Por favor, selecciona un vehículo y un kit primero.');
-                return;
-            }
-            
-            const total = selectedVehicle.price + (selectedKit.price || 0);
-            
-            const message = `Hola, quisiera cotizar esta configuración personalizada:%0A%0A🚗 *Vehículo:* ${selectedVehicle.name}%0A💰 *Precio base:* $${formatPrice(selectedVehicle.price)} CLP%0A%0A⚙️ *Kit seleccionado:* ${selectedKit.name}%0A📋 *Descripción:* ${selectedKit.description}%0A🔧 *Incluye:* ${(selectedKit.features || []).join(', ')}%0A💵 *Valor kit:* $${formatPrice(selectedKit.price || 0)} CLP%0A%0A💵 *TOTAL CONFIGURACIÓN:* $${formatPrice(total)} CLP%0A%0A¿Podemos proceder con esta configuración?`;
-            
-            trackEvent('request', 'Customization Quote', `${selectedVehicle.name} - ${selectedKit.name}`);
-            
-            const whatsappNumber = siteData.config.find(c => c.key === 'whatsapp_number')?.value || '56938654827';
-            window.open(`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`, '_blank');
-        }
-
-        // ========== FUNCIONES DE CIERRE DE MODALES ==========
-
-        function closeVehicleDetailsModal() {
-            document.getElementById('vehicleDetailsModal').style.display = 'none';
-            document.body.style.overflow = 'auto';
-            selectedVehicle = null;
-            currentGalleryIndex = 0;
-        }
-
-        function closeCustomizationModal() {
-            document.getElementById('customizationModal').style.display = 'none';
-            document.body.style.overflow = 'auto';
-            selectedVehicle = null;
-            selectedKit = null;
-        }
-
-        // Cerrar modales con ESC
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                closeVehicleDetailsModal();
-                closeCustomizationModal();
-                closeInstagramGallery();
-            }
         });
-
-        // Cerrar modales al hacer click fuera
-        document.getElementById('vehicleDetailsModal').addEventListener('click', (e) => {
-            if (e.target === document.getElementById('vehicleDetailsModal')) {
-                closeVehicleDetailsModal();
-            }
-        });
-
-        document.getElementById('customizationModal').addEventListener('click', (e) => {
-            if (e.target === document.getElementById('customizationModal')) {
-                closeCustomizationModal();
-            }
-        });
-
-        document.getElementById('instagramGalleryModal').addEventListener('click', (e) => {
-            if (e.target === document.getElementById('instagramGalleryModal')) {
-                closeInstagramGallery();
-            }
-        });
-
-        // ========== FUNCIONES DE ACTUALIZACIÓN ==========
-
-        async function refreshData() {
-            console.log('🔄 Actualizando datos manualmente...');
-            
-            // Mostrar indicador de carga
-            const refreshBtn = event?.target || document.querySelector('button[onclick="refreshData()"]');
-            const originalText = refreshBtn.innerHTML;
-            refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
-            refreshBtn.disabled = true;
-            
-            try {
-                // Limpiar caché
-                localStorage.removeItem(CACHE_KEY);
-                
-                // Recargar datos
-                await loadSiteData();
-                
-                // Actualizar todo el sitio
-                updateStockCounts();
-                updateCounterSection();
-                loadVehicles(currentFilter);
-                loadTestimonials();
-                loadInstagram();
-                updateContactInfo();
-                updateHeroContent();
-                updateTransitTimers();
-                
-                // Animar contador nuevamente
-                animateCounter();
-                
-                console.log('✅ Datos actualizados correctamente');
-                
-                // Mostrar mensaje de éxito
-                const lastUpdated = document.getElementById('lastUpdated');
-                if (lastUpdated) {
-                    lastUpdated.textContent = 'Actualizado: Ahora mismo';
-                    setTimeout(() => {
-                        updateLastUpdated();
-                    }, 3000);
-                }
-                
-            } catch (error) {
-                console.error('❌ Error actualizando datos:', error);
-                alert('Error al actualizar los datos. Por favor, inténtalo nuevamente.');
-            } finally {
-                // Restaurar botón
-                refreshBtn.innerHTML = originalText;
-                refreshBtn.disabled = false;
-            }
-        }
-
-        // ========== FUNCIONES UTILITARIAS ==========
-
-        function formatPrice(price) {
-            if (!price && price !== 0) return '0';
-            return price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-        }
-
-        // ========== TRACKING DE SCROLL ==========
-
-        let scrollTracked25 = false;
-        let scrollTracked50 = false;
-        let scrollTracked75 = false;
-        let scrollTracked100 = false;
-
-        window.addEventListener('scroll', () => {
-            const scrollTop = window.scrollY;
-            const windowHeight = window.innerHeight;
-            const docHeight = document.documentElement.scrollHeight;
-            const scrollPercent = (scrollTop / (docHeight - windowHeight)) * 100;
-            
-            if (scrollPercent >= 25 && !scrollTracked25) {
-                trackEvent('scroll', 'Engagement', '25%');
-                scrollTracked25 = true;
-            }
-            if (scrollPercent >= 50 && !scrollTracked50) {
-                trackEvent('scroll', 'Engagement', '50%');
-                scrollTracked50 = true;
-            }
-            if (scrollPercent >= 75 && !scrollTracked75) {
-                trackEvent('scroll', 'Engagement', '75%');
-                scrollTracked75 = true;
-            }
-            if (scrollPercent >= 95 && !scrollTracked100) {
-                trackEvent('scroll', 'Engagement', '100%');
-                scrollTracked100 = true;
-            }
-        });
-
-        // Track tiempo en página
-        let pageLoadTime = Date.now();
-        window.addEventListener('beforeunload', () => {
-            const timeOnPage = Math.round((Date.now() - pageLoadTime) / 1000);
-            trackEvent('time', 'Engagement', `${timeOnPage}s`);
-        });
-
-        // ========== INICIALIZACIÓN FINAL ==========
-
-        // Inicializar el sitio cuando el DOM esté listo
-        document.addEventListener('DOMContentLoaded', initializeSite);
+    }
+    
+    // ========== 4. FUNCIONES UTILITARIAS RÁPIDAS ==========
+    
+    function initializeStaticFunctions() {
+        // Funciones que no dependen de datos
+        setupFilters();
+        setupClickableIndicators();
+        setupGalleryKeyboard();
+        setupModalEvents();
         
-        // También permitir inicialización manual si es necesario
-        window.initializeSite = initializeSite;
-        window.refreshData = refreshData;
-        window.filterVehicles = filterVehicles;
-        window.showVehicleDetails = showVehicleDetails;
-        window.customizeVehicle = customizeVehicle;
-        window.showCustomizationModal = showCustomizationModal;
-        window.contactVehicle = contactVehicle;
-        window.requestCustomization = requestCustomization;
-        window.selectKit = selectKit;
-        window.openInstagramGallery = openInstagramGallery;
-        window.changeGallerySlide = changeGallerySlide;
-        window.goToSlide = goToSlide;
-        window.toggleZoom = toggleZoom;
-        window.closeInstagramGallery = closeInstagramGallery;
-        window.changeGalleryImage = changeGalleryImage;
-        window.closeVehicleDetailsModal = closeVehicleDetailsModal;
-        window.closeCustomizationModal = closeCustomizationModal;
-
-        console.log('✅ Script cargado correctamente. El sitio se inicializará automáticamente.');
-
-    </script>
+        // Mostrar que la página está lista
+        document.body.classList.add('loaded');
+    }
+    
+    function setupClickableIndicators() {
+        // Hacer contadores clickeables
+        const indicators = document.querySelectorAll('.stock-indicators .indicator');
+        if (indicators.length >= 3) {
+            indicators[0].onclick = () => filterAndScroll('stock');
+            indicators[1].onclick = () => filterAndScroll('transit');
+            indicators[2].onclick = () => filterAndScroll('reserve');
+        }
+    }
+    
+    function filterAndScroll(filter) {
+        filterVehicles(filter);
+        setTimeout(() => {
+            const section = document.getElementById('vehicles');
+            if (section) section.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+    }
+    
+    // ========== 5. FUNCIONES DE FORMATO Y ERROR HANDLING ==========
+    
+    function formatPrice(price) {
+        if (!price && price !== 0) return '0';
+        return price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    }
+    
+    function animateCounter() {
+        const counter = document.getElementById('importedVehiclesCounter');
+        if (!counter) return;
+        
+        const target = parseInt(counter.textContent) || 0;
+        if (target <= 0) return;
+        
+        let current = 0;
+        const increment = Math.ceil(target / 50);
+        const timer = setInterval(() => {
+            current += increment;
+            if (current >= target) {
+                current = target;
+                clearInterval(timer);
+            }
+            counter.textContent = current;
+        }, 30);
+    }
+    
+    // ========== 6. EXPORTAR FUNCIONES AL SCOPE GLOBAL ==========
+    
+    window.filterVehicles = filterVehicles;
+    window.showVehicleDetails = showVehicleDetails;
+    window.customizeVehicle = customizeVehicle;
+    window.contactVehicle = contactVehicle;
+    window.refreshData = () => {
+        localStorage.removeItem(CACHE_KEY);
+        location.reload();
+    };
+    
+    console.log('✅ Script cargado. La página cargará inmediatamente.');
+</script>
 </body>
 </html>
